@@ -49,11 +49,11 @@ def main():
         bos = tokenizer.special_tokens_map["cls_token"]  # `[CLS]`
         sep = tokenizer.special_tokens_map["sep_token"]  # `[SEP]`
     elif args.tokenizer_type == "roberta":
-        tokenizer = RobertaTokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir))
+        tokenizer = RobertaTokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir)
         bos = tokenizer.special_tokens_map["cls_token"]  # `<s>`
         sep = tokenizer.special_tokens_map["sep_token"]  # `</s>`
     elif args.tokenizer_type == "gpt2":
-        tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir))
+        tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir)
         bos = tokenizer.special_tokens_map["bos_token"]  # `<|endoftext|>`
         sep = tokenizer.special_tokens_map["eos_token"]  # `<|endoftext|>`
 
