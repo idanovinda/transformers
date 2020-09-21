@@ -40,19 +40,20 @@ def main():
     parser.add_argument("--tokenizer_type", type=str, default="bert", choices=["bert", "roberta", "gpt2"])
     parser.add_argument("--tokenizer_name", type=str, default="bert-base-uncased", help="The tokenizer to use.")
     parser.add_argument("--dump_file", type=str, default="data/dump", help="The dump file prefix.")
+    parser.add_argument("--cache_dir", type=str, default=None, help="The directory where the pretrained transformers saved")
     args = parser.parse_args()
 
     logger.info(f"Loading Tokenizer ({args.tokenizer_name})")
     if args.tokenizer_type == "bert":
-        tokenizer = BertTokenizer.from_pretrained(args.tokenizer_name)
+        tokenizer = BertTokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir)
         bos = tokenizer.special_tokens_map["cls_token"]  # `[CLS]`
         sep = tokenizer.special_tokens_map["sep_token"]  # `[SEP]`
     elif args.tokenizer_type == "roberta":
-        tokenizer = RobertaTokenizer.from_pretrained(args.tokenizer_name)
+        tokenizer = RobertaTokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir))
         bos = tokenizer.special_tokens_map["cls_token"]  # `<s>`
         sep = tokenizer.special_tokens_map["sep_token"]  # `</s>`
     elif args.tokenizer_type == "gpt2":
-        tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name)
+        tokenizer = GPT2Tokenizer.from_pretrained(args.tokenizer_name, cache_dir=args.cache_dir))
         bos = tokenizer.special_tokens_map["bos_token"]  # `<|endoftext|>`
         sep = tokenizer.special_tokens_map["eos_token"]  # `<|endoftext|>`
 

@@ -1,3 +1,4 @@
+export CACHE_DIR=/pre-trained-transformers
 export BASE_DIR=$1
 export FILENAME=$2
 export CUDA_VISIBLE_DEVICES=$3
@@ -6,6 +7,7 @@ python scripts/binarized_data.py \
     --file_path $BASE_DIR/$FILENAME.txt \
     --tokenizer_type bert \
     --tokenizer_name bert-base-uncased \
+    --cache_dir $CACHE_DIR \
     --dump_file $BASE_DIR/binarized_$FILENAME
 
 python scripts/token_counts.py \
