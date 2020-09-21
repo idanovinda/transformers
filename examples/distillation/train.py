@@ -197,6 +197,7 @@ def main():
     parser.add_argument("--adam_epsilon", default=1e-6, type=float, help="Epsilon for Adam optimizer.")
     parser.add_argument("--max_grad_norm", default=5.0, type=float, help="Max gradient norm.")
     parser.add_argument("--initializer_range", default=0.02, type=float, help="Random initialization range.")
+    parser.add_argument("--cache_dir", type=str, default=None, help="The directory where the pretrained transformers saved")
 
     parser.add_argument(
         "--fp16",
@@ -246,7 +247,7 @@ def main():
     teacher_config_class, teacher_model_class, teacher_tokenizer_class = MODEL_CLASSES[args.teacher_type]
 
     # TOKENIZER #
-    tokenizer = teacher_tokenizer_class.from_pretrained(args.teacher_name)
+    tokenizer = teacher_tokenizer_class.from_pretrained(args.teacher_name, cache_dir=args.cache_dir)
     special_tok_ids = {}
     for tok_name, tok_symbol in tokenizer.special_tokens_map.items():
         idx = tokenizer.all_special_tokens.index(tok_symbol)
@@ -277,12 +278,12 @@ def main():
 
     # STUDENT #
     logger.info(f"Loading student config from {args.student_config}")
-    stu_architecture_config = student_config_class.from_pretrained(args.student_config)
+    stu_architecture_config = student_config_class.from_pretrained(args.student_config, cache_dir=args.cache_dir)
     stu_architecture_config.output_hidden_states = True
 
     if args.student_pretrained_weights is not None:
         logger.info(f"Loading pretrained weights from {args.student_pretrained_weights}")
-        student = student_model_class.from_pretrained(args.student_pretrained_weights, config=stu_architecture_config)
+        student = student_model_class.from_pretrained(args.student_pretrained_weights, config=stu_architecture_config, cache_dir=args.cache_dir)
     else:
         student = student_model_class(stu_architecture_config)
 
@@ -291,7 +292,7 @@ def main():
     logger.info("Student loaded.")
 
     # TEACHER #
-    teacher = teacher_model_class.from_pretrained(args.teacher_name, output_hidden_states=True)
+    teacher = teacher_model_class.from_pretrained(args.teacher_name, output_hidden_states=True, cache_dir=args.cache_dir)
     if args.gpus > 0:
         teacher.to(f"cuda:{args.local_rank}")
     logger.info(f"Teacher loaded from {args.teacher_name}.")

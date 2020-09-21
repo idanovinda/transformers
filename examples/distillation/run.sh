@@ -20,6 +20,7 @@ python train.py \
     --student_config training_configs/distilbert-base-uncased.json \
     --teacher_type bert \
     --teacher_name bert-base-uncased \
+    --cache_dir $CACHE_DIR \
     --alpha_ce 5.0 --alpha_mlm 2.0 --alpha_cos 1.0 --alpha_clm 0.0 --mlm \
     --freeze_pos_embs \
     --dump_path /logs/distilbert/$FILENAME \
