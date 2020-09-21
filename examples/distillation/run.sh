@@ -20,7 +20,7 @@ python train.py \
     --teacher_name bert-base-uncased \
     --alpha_ce 5.0 --alpha_mlm 2.0 --alpha_cos 1.0 --alpha_clm 0.0 --mlm \
     --freeze_pos_embs \
-    --dump_path /logs/distilbert/wikipedia_100 \
+    --dump_path /logs/distilbert/$FILENAME \
     --data_file $BASE_DIR/binarized_$FILENAME.bert-base-uncased.pickle \
     --token_counts $BASE_DIR/token_counts.bert-base-uncased.pickle \
     --force
