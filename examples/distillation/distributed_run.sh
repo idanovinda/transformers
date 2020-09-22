@@ -16,10 +16,10 @@ python scripts/token_counts.py \
     --vocab_size 30522
 
 export NODE_RANK=0
-export N_NODES=$4
+export N_NODES=1
 
-export N_GPU_NODE=8
-export WORLD_SIZE=8
+export N_GPU_NODE=$4
+export WORLD_SIZE=$4
 
 pkill -f 'python -u train.py'
 
