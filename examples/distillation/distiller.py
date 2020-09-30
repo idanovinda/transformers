@@ -362,7 +362,12 @@ class Distiller:
 
             if self.is_master:
                 logger.info(f"--- Ending epoch {self.epoch}/{self.params.n_epoch-1}")
+                if (self.epoch+1)%self.params.checkpoint_epoch_interval==0:
+                    logger.info(f"--- Saving model in epoch checkpoint {self.epoch}")
+                    self.save_checkpoint(checkpoint_name="pytorch_model.bin", dir="checkpoint_epoch_"+str(self.epoch+1))
             self.end_epoch()
+
+            
 
         if self.is_master:
             logger.info("Save very last checkpoint as `pytorch_model.bin`.")
@@ -591,13 +596,14 @@ class Distiller:
         self.n_iter = 0
         self.total_loss_epoch = 0
 
-    def save_checkpoint(self, checkpoint_name: str = "checkpoint.pth"):
+    def save_checkpoint(self, checkpoint_name: str = "checkpoint.pth", dir: str =''):
         """
         Save the current state. Only by the master process.
         """
         if not self.is_master:
             return
         mdl_to_save = self.student.module if hasattr(self.student, "module") else self.student
-        mdl_to_save.config.save_pretrained(self.dump_path)
+        mdl_to_save.config.save_pretrained(os.path.join(self.dump_path, dir))
         state_dict = mdl_to_save.state_dict()
-        torch.save(state_dict, os.path.join(self.dump_path, checkpoint_name))
+        torch.save(state_dict, os.path.join(self.dump_path, dir, checkpoint_name))
+        
