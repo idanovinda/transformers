@@ -31,7 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-ray.init()
+ray.init(dashboard_host="127.0.0.1")
 
 @ray.remote
 def tokenize_data(tokenizer, bos, sep, data):
@@ -40,7 +40,6 @@ def tokenize_data(tokenizer, bos, sep, data):
         text = f"{bos} {text.strip()} {sep}"
         token_ids = tokenizer.encode(text, add_special_tokens=False, truncation='only_second', max_length=tokenizer.model_max_length)
         rslt.append(token_ids)
-    
     return rslt
 
 def main():
@@ -81,8 +80,8 @@ def main():
     interval = 10000
     start = time.time()
     for i in range(args.n_par):
-        rslt.extend(tokenize_data(tokenizer, bos, sep, data[i/args.n_par*len(data):(i+1)/args.n_par*len(data)]))
-
+        rslt_i = tokenize_data.remote(tokenizer, bos, sep, data[int(i/args.n_par*len(data)):int((i+1)/args.n_par*len(data))])
+        rslt.extend(ray.get(rslt_i))
     logger.info("Finished binarization")
     logger.info(f"{len(data)} examples processed.")
 
