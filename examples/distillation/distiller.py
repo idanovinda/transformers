@@ -42,7 +42,7 @@ except ImportError:
 
 class Distiller:
     def __init__(
-        self, params: dict, dataset: LmSeqsDataset, token_probs: torch.tensor, student: nn.Module, teacher: nn.Module
+        self, params: dict, dataset: LmSeqsDataset, token_probs: torch.tensor, student: nn.Module, teacher: nn.Module, tokenizer: nn.Module
     ):
         logger.info("Initializing Distiller")
         self.params = params
@@ -52,6 +52,7 @@ class Distiller:
 
         self.student = student
         self.teacher = teacher
+        self.tokenizer = tokenizer
 
         self.student_config = student.config
         self.vocab_size = student.config.vocab_size
@@ -606,4 +607,5 @@ class Distiller:
         mdl_to_save.config.save_pretrained(os.path.join(self.dump_path, dir))
         state_dict = mdl_to_save.state_dict()
         torch.save(state_dict, os.path.join(self.dump_path, dir, checkpoint_name))
+        self.tokenizer.save_pretrained(os.path.join(self.dump_path, dir))
         

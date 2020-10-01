@@ -314,7 +314,7 @@ def main():
     # DISTILLER #
     torch.cuda.empty_cache()
     distiller = Distiller(
-        params=args, dataset=train_lm_seq_dataset, token_probs=token_probs, student=student, teacher=teacher
+        params=args, dataset=train_lm_seq_dataset, token_probs=token_probs, student=student, teacher=teacher, tokenizer=tokenizer
     )
     distiller.train()
     logger.info("Let's go get some drinks.")
