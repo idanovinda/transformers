@@ -218,6 +218,9 @@ def main():
     parser.add_argument("--log_interval", type=int, default=500, help="Tensorboard logging interval.")
     parser.add_argument("--checkpoint_interval", type=int, default=4000, help="Checkpoint interval.")
     parser.add_argument("--checkpoint_epoch_interval", type=int, default=2, help="Checkpoint interval to save model in epoch")
+
+    parser.add_argument("--teacher_distribution", type=str, default="", help="How to change the teacher distribution on student training (uniform, shuffle)")
+
     args = parser.parse_args()
     sanity_checks(args)
 

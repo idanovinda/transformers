@@ -18,6 +18,7 @@
 import math
 import os
 import time
+import numpy as np
 
 import psutil
 import torch
@@ -416,10 +417,23 @@ class Distiller:
         t_logits_slct = t_logits_slct.view(-1, s_logits.size(-1))  # (bs * seq_length, voc_size) modulo the 1s in mask
         assert t_logits_slct.size() == s_logits_slct.size()
 
+        t_softmax = F.softmax(t_logits_slct / self.temperature, dim=-1)
+        t_softmax_max, t_softmax_argmax = torch.max(t_softmax, dim=-1)
+
+        #change the distribution of teacher to uniform or 
+        if self.params.teacher_distribution == "uniform":
+            t_softmax_uniform = ((1-t_softmax_max)/(t_softmax.size(-1)-1)).unsqueeze(-1).repeat(1, t_softmax.size(-1))
+            t_softmax_uniform[np.arange(t_softmax.size(0)), t_softmax_argmax] = t_softmax_max
+            t_softmax = t_softmax_uniform
+            assert t_softmax.size() == s_logits_slct.size()
+        elif self.params.teacher_distribution == "shuffle":
+            pass
+
+
         loss_ce = (
             self.ce_loss_fct(
                 F.log_softmax(s_logits_slct / self.temperature, dim=-1),
-                F.softmax(t_logits_slct / self.temperature, dim=-1),
+                t_softmax,
             )
             * (self.temperature) ** 2
         )
