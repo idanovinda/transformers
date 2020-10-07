@@ -427,8 +427,13 @@ class Distiller:
             t_softmax = t_softmax_uniform
             assert t_softmax.size() == s_logits_slct.size()
         elif self.params.teacher_distribution == "shuffle":
-            pass
-
+            t_shuffled = t_softmax[:,torch.randperm(t_softmax.size()[1])]
+            t_shuffled_max, t_shuffled_argmax = torch.max(t_shuffled, dim=-1)
+            tmp = t_shuffled[np.arange(t_softmax.size(0)), t_softmax_argmax]
+            t_shuffled[np.arange(t_softmax.size(0)), t_softmax_argmax] = t_softmax_max
+            t_shuffled[np.arange(t_softmax.size(0)), t_shuffled_argmax] = tmp
+            t_softmax = t_shuffled
+            assert t_softmax.size() == s_logits_slct.size()
 
         loss_ce = (
             self.ce_loss_fct(
