@@ -434,6 +434,11 @@ class Distiller:
             t_shuffled[np.arange(t_softmax.size(0)), t_shuffled_argmax] = tmp
             t_softmax = t_shuffled
             assert t_softmax.size() == s_logits_slct.size()
+        elif self.params.teacher_distribution == "one-hot":
+            t_one_hot = t_softmax
+            t_one_hot[:, :] = 0.0
+            t_one_hot[np.arange(t_softmax.size(0)), t_softmax_argmax] = 1
+            assert t_softmax.size() == s_logits_slct.size()
 
         loss_ce = (
             self.ce_loss_fct(
@@ -444,6 +449,8 @@ class Distiller:
         )
         loss = self.alpha_ce * loss_ce
 
+
+        jfkajka
         if self.alpha_mlm > 0.0:
             loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
             loss += self.alpha_mlm * loss_mlm
