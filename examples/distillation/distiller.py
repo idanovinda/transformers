@@ -449,8 +449,6 @@ class Distiller:
         )
         loss = self.alpha_ce * loss_ce
 
-
-        jfkajka
         if self.alpha_mlm > 0.0:
             loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
             loss += self.alpha_mlm * loss_mlm
