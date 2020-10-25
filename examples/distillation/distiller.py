@@ -438,6 +438,7 @@ class Distiller:
             t_one_hot = t_softmax
             t_one_hot[:, :] = 0.0
             t_one_hot[np.arange(t_softmax.size(0)), t_softmax_argmax] = 1
+            t_softmax = t_one_hot
             assert t_softmax.size() == s_logits_slct.size()
 
         loss_ce = (
