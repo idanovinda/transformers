@@ -404,7 +404,7 @@ class Distiller:
                     input_ids=input_ids, attention_mask=None
                 )  # (bs, seq_length, voc_size)
         assert s_logits.size() == t_logits.size()
-
+        
         # https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py#L100
         # https://github.com/peterliht/knowledge-distillation-pytorch/issues/2
         if self.params.restrict_ce_to_mask:
@@ -439,6 +439,18 @@ class Distiller:
             t_one_hot[:, :] = 0.0
             t_one_hot[np.arange(t_softmax.size(0)), t_softmax_argmax] = 1
             t_softmax = t_one_hot
+            print(t_one_hot)
+            assert t_softmax.size() == s_logits_slct.size()
+        elif self.params.teacher_distribution == "hard":
+            input_ids_ = input_ids.clone().reshape(input_ids.size(0)*input_ids.size(1), 1)
+            t_hard = input_ids_.clone().zero_()
+            t_hard_one_hot = t_hard.repeat(1, s_logits.size(-1))
+            t_hard_one_hot.scatter_(1, input_ids_, 1)
+            t_hard_one_hot = t_hard_one_hot.reshape(input_ids.size(0), input_ids.size(1), t_hard_one_hot.size(-1))
+            _, t_hard_argmax = torch.max(t_hard_one_hot, -1)
+            assert torch.all(torch.eq(input_ids, t_hard_argmax))
+            t_hard_one_hot_slct = torch.masked_select(t_hard_one_hot, mask)
+            t_softmax = t_hard_one_hot_slct.view(-1, t_hard_one_hot.size(-1))
             assert t_softmax.size() == s_logits_slct.size()
 
         loss_ce = (

@@ -74,7 +74,7 @@ def sanity_checks(args):
     if args.freeze_token_type_embds:
         assert args.student_type in ["roberta"]
 
-    assert args.teacher_distribution in ["original", "one-hot", "shuffle", "uniform"]
+    assert args.teacher_distribution in ["original", "one-hot", "shuffle", "uniform", "hard"]
 
     assert args.alpha_ce >= 0.0
     assert args.alpha_mlm >= 0.0
