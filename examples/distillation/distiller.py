@@ -439,7 +439,6 @@ class Distiller:
             t_one_hot[:, :] = 0.0
             t_one_hot[np.arange(t_softmax.size(0)), t_softmax_argmax] = 1
             t_softmax = t_one_hot
-            print(t_one_hot)
             assert t_softmax.size() == s_logits_slct.size()
         elif self.params.teacher_distribution == "hard":
             input_ids_ = input_ids.clone().reshape(input_ids.size(0)*input_ids.size(1), 1)
@@ -450,7 +449,7 @@ class Distiller:
             _, t_hard_argmax = torch.max(t_hard_one_hot, -1)
             assert torch.all(torch.eq(input_ids, t_hard_argmax))
             t_hard_one_hot_slct = torch.masked_select(t_hard_one_hot, mask)
-            t_softmax = t_hard_one_hot_slct.view(-1, t_hard_one_hot.size(-1))
+            t_softmax = t_hard_one_hot_slct.view(-1, t_hard_one_hot.size(-1)).type(s_logits_slct.type())
             assert t_softmax.size() == s_logits_slct.size()
 
         loss_ce = (
