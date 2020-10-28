@@ -441,13 +441,15 @@ class Distiller:
             t_softmax = t_one_hot
             assert t_softmax.size() == s_logits_slct.size()
         elif self.params.teacher_distribution == "hard":
-            input_ids_ = input_ids.clone().reshape(input_ids.size(0)*input_ids.size(1), 1)
-            t_hard = input_ids_.clone().zero_()
-            t_hard_one_hot = t_hard.repeat(1, s_logits.size(-1))
-            t_hard_one_hot.scatter_(1, input_ids_, 1)
-            t_hard_one_hot = t_hard_one_hot.reshape(input_ids.size(0), input_ids.size(1), t_hard_one_hot.size(-1))
+            input_ids_ = input_ids.clone()
+            input_ids_ = torch.where(input_ids_==103, lm_labels, input_ids_) #get the original vocab when it's masked 
+            input_ids_reshape = input_ids_.reshape(input_ids.size(0)*input_ids.size(1), 1) #reshape to (bs*seq_length, 1)
+            t_hard = input_ids_reshape.clone().zero_()
+            t_hard_one_hot = t_hard.repeat(1, s_logits.size(-1)) #clone the size change to zero, reshape (bs*seq_length, vocab_size)
+            t_hard_one_hot.scatter_(1, input_ids_reshape, 1) #fill the value
+            t_hard_one_hot = t_hard_one_hot.reshape(input_ids.size(0), input_ids.size(1), t_hard_one_hot.size(-1)) #reshape to (bs, seq_length, vocab_size)
             _, t_hard_argmax = torch.max(t_hard_one_hot, -1)
-            assert torch.all(torch.eq(input_ids, t_hard_argmax))
+            assert torch.all(torch.eq(input_ids_, t_hard_argmax))
             t_hard_one_hot_slct = torch.masked_select(t_hard_one_hot, mask)
             t_softmax = t_hard_one_hot_slct.view(-1, t_hard_one_hot.size(-1)).type(s_logits_slct.type())
             assert t_softmax.size() == s_logits_slct.size()
