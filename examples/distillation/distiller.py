@@ -58,6 +58,10 @@ class Distiller:
         self.student_config = student.config
         self.vocab_size = student.config.vocab_size
 
+        self.agreement_sum = 0
+        self.agreement_len = 0
+
+
         if params.gpus <= 1:
             sampler = RandomSampler(dataset)
         else:
@@ -369,8 +373,6 @@ class Distiller:
                     self.save_checkpoint(checkpoint_name="pytorch_model.bin", dir="checkpoint_epoch_"+str(self.epoch+1))
             self.end_epoch()
 
-            
-
         if self.is_master:
             logger.info("Save very last checkpoint as `pytorch_model.bin`.")
             self.save_checkpoint(checkpoint_name="pytorch_model.bin")
@@ -404,7 +406,7 @@ class Distiller:
                     input_ids=input_ids, attention_mask=None
                 )  # (bs, seq_length, voc_size)
         assert s_logits.size() == t_logits.size()
-        
+
         # https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py#L100
         # https://github.com/peterliht/knowledge-distillation-pytorch/issues/2
         if self.params.restrict_ce_to_mask:
@@ -417,42 +419,61 @@ class Distiller:
         t_logits_slct = t_logits_slct.view(-1, s_logits.size(-1))  # (bs * seq_length, voc_size) modulo the 1s in mask
         assert t_logits_slct.size() == s_logits_slct.size()
 
-        t_softmax = F.softmax(t_logits_slct / self.temperature, dim=-1)
-        t_softmax_max, t_softmax_argmax = torch.max(t_softmax, dim=-1)
+        t_softmax_ori = F.softmax(t_logits_slct / self.temperature, dim=-1)
+        t_softmax_max, t_softmax_argmax = torch.max(t_softmax_ori, dim=-1)
 
-        #change the distribution of teacher to uniform or 
-        if self.params.teacher_distribution == "uniform":
-            t_softmax_uniform = ((1-t_softmax_max)/(t_softmax.size(-1)-1)).unsqueeze(-1).repeat(1, t_softmax.size(-1))
-            t_softmax_uniform[np.arange(t_softmax.size(0)), t_softmax_argmax] = t_softmax_max
+        #get the one hot for hard label
+        input_ids_ = input_ids.clone()
+        input_ids_ = torch.where(input_ids_==103, lm_labels, input_ids_) #get the original vocab when it's masked 
+        input_ids_reshape = input_ids_.reshape(input_ids.size(0)*input_ids.size(1), 1) #reshape to (bs*seq_length, 1)
+        t_hard = input_ids_reshape.clone().zero_()
+        t_hard_one_hot = t_hard.repeat(1, s_logits.size(-1)) #clone the size change to zero, reshape (bs*seq_length, vocab_size)
+        t_hard_one_hot.scatter_(1, input_ids_reshape, 1) #fill the value
+        t_hard_one_hot = t_hard_one_hot.reshape(input_ids.size(0), input_ids.size(1), t_hard_one_hot.size(-1)) #reshape to (bs, seq_length, vocab_size)
+        _, t_hard_argmax = torch.max(t_hard_one_hot, -1)
+        assert torch.all(torch.eq(input_ids_, t_hard_argmax))
+        t_hard_one_hot_slct = torch.masked_select(t_hard_one_hot, mask)
+        t_hard_one_hot_slct = t_hard_one_hot_slct.view(-1, t_hard_one_hot.size(-1)).type(s_logits_slct.type())
+
+        #calculate the agreement
+        _, t_logits_slct_argmax = torch.max(t_logits_slct, -1)
+        _, t_hard_one_hot_slct_argmax = torch.max(t_hard_one_hot_slct, -1)
+        agreement = torch.eq(t_logits_slct_argmax, t_hard_one_hot_slct_argmax)
+        self.agreement_sum += agreement.sum().item()
+        self.agreement_len += len(agreement)
+
+        #change the distribution of teacher 
+        if self.params.teacher_distribution == "original":
+            t_softmax = t_softmax_ori.clone()
+        elif self.params.teacher_distribution == "uniform":
+            t_softmax_uniform = ((1-t_softmax_max)/(t_softmax_ori.size(-1)-1)).unsqueeze(-1).repeat(1, t_softmax_ori.size(-1))
+            t_softmax_uniform[np.arange(t_softmax_ori.size(0)), t_softmax_argmax] = t_softmax_max
             t_softmax = t_softmax_uniform
             assert t_softmax.size() == s_logits_slct.size()
         elif self.params.teacher_distribution == "shuffle":
-            t_shuffled = t_softmax[:,torch.randperm(t_softmax.size()[1])]
+            t_shuffled = t_softmax_ori[:,torch.randperm(t_softmax.size()[1])]
             t_shuffled_max, t_shuffled_argmax = torch.max(t_shuffled, dim=-1)
-            tmp = t_shuffled[np.arange(t_softmax.size(0)), t_softmax_argmax]
-            t_shuffled[np.arange(t_softmax.size(0)), t_softmax_argmax] = t_softmax_max
-            t_shuffled[np.arange(t_softmax.size(0)), t_shuffled_argmax] = tmp
+            tmp = t_shuffled[np.arange(t_softmax_ori.size(0)), t_softmax_argmax]
+            t_shuffled[np.arange(t_softmax_ori.size(0)), t_softmax_argmax] = t_softmax_max
+            t_shuffled[np.arange(t_softmax_ori.size(0)), t_shuffled_argmax] = tmp
             t_softmax = t_shuffled
             assert t_softmax.size() == s_logits_slct.size()
         elif self.params.teacher_distribution == "one-hot":
-            t_one_hot = t_softmax
+            t_one_hot = t_softmax_ori.clone()
             t_one_hot[:, :] = 0.0
-            t_one_hot[np.arange(t_softmax.size(0)), t_softmax_argmax] = 1
-            t_softmax = t_one_hot
+            t_one_hot[np.arange(t_softmax_ori.size(0)), t_softmax_argmax] = 1
+            t_softmax = t_one_hot.clone()
             assert t_softmax.size() == s_logits_slct.size()
-        elif self.params.teacher_distribution == "hard":
-            input_ids_ = input_ids.clone()
-            input_ids_ = torch.where(input_ids_==103, lm_labels, input_ids_) #get the original vocab when it's masked 
-            input_ids_reshape = input_ids_.reshape(input_ids.size(0)*input_ids.size(1), 1) #reshape to (bs*seq_length, 1)
-            t_hard = input_ids_reshape.clone().zero_()
-            t_hard_one_hot = t_hard.repeat(1, s_logits.size(-1)) #clone the size change to zero, reshape (bs*seq_length, vocab_size)
-            t_hard_one_hot.scatter_(1, input_ids_reshape, 1) #fill the value
-            t_hard_one_hot = t_hard_one_hot.reshape(input_ids.size(0), input_ids.size(1), t_hard_one_hot.size(-1)) #reshape to (bs, seq_length, vocab_size)
-            _, t_hard_argmax = torch.max(t_hard_one_hot, -1)
-            assert torch.all(torch.eq(input_ids_, t_hard_argmax))
-            t_hard_one_hot_slct = torch.masked_select(t_hard_one_hot, mask)
-            t_softmax = t_hard_one_hot_slct.view(-1, t_hard_one_hot.size(-1)).type(s_logits_slct.type())
+        elif self.params.teacher_distribution == "hard":   
+            t_softmax = t_hard_one_hot_slct.clone() #just use the one-hot value without converting to softmax value. 
             assert t_softmax.size() == s_logits_slct.size()
+        elif self.params.teacher_distribution == "correction":
+            tmp = t_softmax_ori[np.arange(t_softmax_ori.size(0)), t_hard_one_hot_slct_argmax] 
+            t_softmax = t_softmax_ori.clone()
+            t_softmax[np.arange(t_softmax_ori.size(0)), t_hard_one_hot_slct_argmax]  = t_softmax_max
+            t_softmax[np.arange(t_softmax_ori.size(0)), t_softmax_argmax] = tmp 
+            _, t_softmax_argmax_ = torch.max(t_softmax, -1)
+            assert (torch.all(torch.eq(t_softmax_argmax_, t_hard_one_hot_slct_argmax)))
 
         loss_ce = (
             self.ce_loss_fct(

@@ -74,7 +74,7 @@ def sanity_checks(args):
     if args.freeze_token_type_embds:
         assert args.student_type in ["roberta"]
 
-    assert args.teacher_distribution in ["original", "one-hot", "shuffle", "uniform", "hard"]
+    assert args.teacher_distribution in ["original", "one-hot", "shuffle", "uniform", "hard", "correction"]
 
     assert args.alpha_ce >= 0.0
     assert args.alpha_mlm >= 0.0
@@ -323,7 +323,7 @@ def main():
     )
     distiller.train()
     logger.info("Let's go get some drinks.")
-
+    logger.info(f"Agreement proportion {distiller.agreement_sum/distiller.agreement_len}")
 
 if __name__ == "__main__":
     main()
