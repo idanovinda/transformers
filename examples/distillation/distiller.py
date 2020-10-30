@@ -473,7 +473,7 @@ class Distiller:
             t_softmax[np.arange(t_softmax_ori.size(0)), t_hard_one_hot_slct_argmax]  = t_softmax_max
             t_softmax[np.arange(t_softmax_ori.size(0)), t_softmax_argmax] = tmp 
             _, t_softmax_argmax_ = torch.max(t_softmax, -1)
-            assert (torch.all(torch.eq(t_softmax_argmax_, t_hard_one_hot_slct_argmax)))
+         #   assert (torch.all(torch.eq(t_softmax_argmax_, t_hard_one_hot_slct_argmax)))
 
         loss_ce = (
             self.ce_loss_fct(
