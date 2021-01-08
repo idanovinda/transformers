@@ -25,6 +25,7 @@ import numpy as np
 
 from transformers import BertTokenizer, GPT2Tokenizer, RobertaTokenizer
 
+np.random.seed(0)
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
