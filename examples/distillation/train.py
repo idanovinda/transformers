@@ -40,6 +40,9 @@ from transformers import (
     RobertaConfig,
     RobertaForMaskedLM,
     RobertaTokenizer,
+    AutoTokenizer,
+    AutoModelForMaskedLM,
+    AutoConfig,
 )
 from utils import git_log, init_gpu_params, logger, set_seed
 
@@ -49,6 +52,7 @@ MODEL_CLASSES = {
     "roberta": (RobertaConfig, RobertaForMaskedLM, RobertaTokenizer),
     "bert": (BertConfig, BertForMaskedLM, BertTokenizer),
     "gpt2": (GPT2Config, GPT2LMHeadModel, GPT2Tokenizer),
+    "auto": (AutoConfig, AutoModelForMaskedLM, AutoTokenizer),
 }
 
 
@@ -60,13 +64,13 @@ def sanity_checks(args):
 #    assert (args.alpha_mlm > 0.0 and args.alpha_clm == 0.0) or (args.alpha_mlm == 0.0 and args.alpha_clm > 0.0)
     if args.mlm:
         assert os.path.isfile(args.token_counts)
-        assert (args.student_type in ["roberta", "distilbert"]) and (args.teacher_type in ["roberta", "bert"])
+        assert (args.student_type in ["roberta", "distilbert"]) and (args.teacher_type in ["roberta", "bert", "auto"])
     else:
         assert (args.student_type in ["gpt2"]) and (args.teacher_type in ["gpt2"])
 
-    assert args.teacher_type == args.student_type or (
-        args.student_type == "distilbert" and args.teacher_type == "bert"
-    )
+    # assert args.teacher_type == args.student_type or (
+    #     args.student_type == "distilbert" and args.teacher_type == "bert"
+    # )
     assert os.path.isfile(args.student_config)
     if args.student_pretrained_weights is not None:
         assert os.path.isfile(args.student_pretrained_weights)
@@ -113,7 +117,7 @@ def main():
     parser.add_argument(
         "--student_type",
         type=str,
-        choices=["distilbert", "roberta", "gpt2"],
+        choices=["distilbert", "roberta", "gpt2", "auto"],
         required=True,
         help="The student type (DistilBERT, RoBERTa).",
     )
@@ -123,7 +127,7 @@ def main():
     )
 
     parser.add_argument(
-        "--teacher_type", choices=["bert", "roberta", "gpt2"], required=True, help="Teacher type (BERT, RoBERTa)."
+        "--teacher_type", choices=["bert", "roberta", "gpt2", "auto"], required=True, help="Teacher type (BERT, RoBERTa)."
     )
     parser.add_argument("--teacher_name", type=str, required=True, help="The teacher model.")
 
@@ -260,7 +264,11 @@ def main():
         special_tok_ids[tok_name] = tokenizer.all_special_ids[idx]
     logger.info(f"Special tokens {special_tok_ids}")
     args.special_tok_ids = special_tok_ids
-    args.max_model_input_size = tokenizer.max_model_input_sizes[args.teacher_name]
+    # print(" >>>>>>>>>>>>>> ",tokenizer.max_model_input_sizes.keys())
+    if args.teacher_type == "auto":
+        args.max_model_input_size = tokenizer.max_model_input_sizes["roberta-base"]
+    else:
+        args.max_model_input_size = tokenizer.max_model_input_sizes[args.teacher_name]
 
     # DATA LOADER #
     logger.info(f"Loading data from {args.data_file}")
