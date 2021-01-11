@@ -26,7 +26,7 @@ fi
 pkill -f 'python -u train.py'
 
 export TRAINABLE=$7
-if [$TRAINABLE -eq 1]; then
+if [ $TRAINABLE -eq 1 ]; then
 python -m torch.distributed.launch \
     --nproc_per_node=$N_GPU_NODE \
     --nnodes=$N_NODES \
@@ -49,5 +49,4 @@ python -m torch.distributed.launch \
         --checkpoint_epoch_interval 1 \
         --student_pretrained_weights /logs/weight_initialization/bert-base-uncased_0247911.pth \
         --teacher_distribution original
-export TRAINABLE=$7
-if [$TRAINABLE -eq 1]; then
+fi
