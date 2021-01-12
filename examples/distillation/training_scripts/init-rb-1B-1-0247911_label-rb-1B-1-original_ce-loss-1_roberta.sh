@@ -43,7 +43,7 @@ python -m torch.distributed.launch \
         --teacher_name nyu-mll/roberta-base-1B-1 \
         --alpha_ce 1.0 --alpha_mlm 0.0 --alpha_cos 0.0 --alpha_clm 0.0 --mlm \
         --freeze_pos_embs \
-        --dump_path /logs/distilbert/$FILENAME.init-bbu-0247911_label-rb-1B-1-original_ce-loss-1_roberta \
+        --dump_path /logs/distilbert/$FILENAME.init-rb-1B-1-0247911_label-rb-1B-1-original_ce-loss-1_roberta \
         --data_file $BASE_DIR/binarized_$FILENAME.roberta-base-1B-1.pickle \
         --token_counts $BASE_DIR/token_counts.roberta-base-1B-1.pickle \
         --checkpoint_epoch_interval 1 \
