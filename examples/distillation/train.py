@@ -226,6 +226,7 @@ def main():
     parser.add_argument("--checkpoint_epoch_interval", type=int, default=2, help="Checkpoint interval to save model in epoch")
 
     parser.add_argument("--teacher_distribution", type=str, default="original", help="How to change the teacher distribution on student training (uniform, shuffle)")
+    parser.add_argument('--remove_layers', type=str, default='', help="specify layer numbers to remove during finetuning e.g. 0,1,2 to remove first three layers")
 
     args = parser.parse_args()
     sanity_checks(args)
@@ -264,7 +265,6 @@ def main():
         special_tok_ids[tok_name] = tokenizer.all_special_ids[idx]
     logger.info(f"Special tokens {special_tok_ids}")
     args.special_tok_ids = special_tok_ids
-    # print(" >>>>>>>>>>>>>> ",tokenizer.max_model_input_sizes.keys())
     if args.teacher_type == "auto":
         args.max_model_input_size = tokenizer.max_model_input_sizes["roberta-base"]
     else:
@@ -304,6 +304,26 @@ def main():
     if args.gpus > 0:
         student.to(f"cuda:{args.local_rank}")
     logger.info("Student loaded.")
+
+    if args.student_type == "distilbert":
+        embed_list = list(student.distilbert.embeddings.parameters())
+        layer_list = student.distilbert.transformer.layer
+
+    if args.student_type == "roberta":
+        embed_list = list(student.roberta.embeddings.parameters())
+        layer_list = student.roberta.encoder.layer
+
+    # check for model reduction
+    remove_layers = args.remove_layers
+    if remove_layers is not "":
+        layer_indexes = [int(x) for x in remove_layers.split(",")]
+        layer_indexes.sort(reverse=True)
+        for layer_idx in layer_indexes:
+            if layer_idx < 0:
+                print ("Only positive indices allowed")
+                sys.exit(1)
+            del(layer_list[layer_idx])
+            print ("Removed Layer: ", layer_idx)
 
     # TEACHER #
     teacher = teacher_model_class.from_pretrained(args.teacher_name, output_hidden_states=True, cache_dir=args.cache_dir)

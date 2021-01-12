@@ -49,6 +49,6 @@ if [ $TRAINABLE -eq 1 ]; then
             --token_counts $BASE_DIR/token_counts.bert-base-uncased.pickle \
             --checkpoint_epoch_interval 1 \
             --student_pretrained_weights /logs/weight_initialization/bert-base-uncased_0247911.pth \
-            --teacher_distribution original
+            --teacher_distribution original \
             --remove_layers 1,2,4
 fi
