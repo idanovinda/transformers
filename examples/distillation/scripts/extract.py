@@ -20,14 +20,14 @@ import argparse
 
 import torch
 
-from transformers import GPT2LMHeadModel, RobertaForMaskedLM
+from transformers import GPT2LMHeadModel, RobertaForMaskedLM, AutoModelForMaskedLM
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Extraction some layers of the full RobertaForMaskedLM or GPT2LMHeadModel for Transfer Learned Distillation"
     )
-    parser.add_argument("--model_type", default="roberta", choices=["roberta", "gpt2"])
+    parser.add_argument("--model_type", default="roberta", choices=["roberta", "gpt2", "auto"])
     parser.add_argument("--model_name", default="roberta-large", type=str)
     parser.add_argument("--dump_checkpoint", default="serialization_dir/tf_roberta_048131723.pth", type=str)
     parser.add_argument("--vocab_transform", action="store_true")
@@ -39,6 +39,9 @@ if __name__ == "__main__":
     elif args.model_type == "gpt2":
         model = GPT2LMHeadModel.from_pretrained(args.model_name)
         prefix = "transformer"
+    elif args.model_type == "auto":
+        model = AutoModelForMaskedLM.from_pretrained(args.model_name)
+        prefix = "roberta" 
 
     state_dict = model.state_dict()
     compressed_sd = {}
