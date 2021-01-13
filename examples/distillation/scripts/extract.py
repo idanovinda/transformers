@@ -34,13 +34,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.model_type == "roberta":
-        model = RobertaForMaskedLM.from_pretrained(args.model_name)
+        model = RobertaForMaskedLM.from_pretrained(args.model_name, cache_dir="/pre-trained-transformers")
         prefix = "roberta"
     elif args.model_type == "gpt2":
         model = GPT2LMHeadModel.from_pretrained(args.model_name)
         prefix = "transformer"
     elif args.model_type == "auto":
-        model = AutoModelForMaskedLM.from_pretrained(args.model_name)
+        model = AutoModelForMaskedLM.from_pretrained(args.model_name, cache_dir="/pre-trained-transformers")
         prefix = "roberta" 
 
     state_dict = model.state_dict()
