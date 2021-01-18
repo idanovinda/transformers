@@ -20,7 +20,7 @@ if [ $BINARIZED -eq 1 ]; then
     python scripts/token_counts.py \
     --data_file $BASE_DIR/binarized_$FILENAME.roberta-base-1B-1.pickle \
     --token_counts_dump $BASE_DIR/token_counts.roberta-base-1B-1.pickle \
-    --vocab_size 30522
+    --vocab_size 50265
 fi
 
 pkill -f 'python -u train.py'
