@@ -37,7 +37,7 @@ python -m torch.distributed.launch \
         --force \
         --gpus $WORLD_SIZE \
         --student_type roberta \
-        --student_config training_configs/distilroberta-base.json \
+        --student_config training_configs/distilrms.json \
         --teacher_type auto \
         --cache_dir $CACHE_DIR \
         --teacher_name nyu-mll/roberta-med-small-1M-1 \
