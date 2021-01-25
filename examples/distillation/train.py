@@ -64,7 +64,7 @@ def sanity_checks(args):
 #    assert (args.alpha_mlm > 0.0 and args.alpha_clm == 0.0) or (args.alpha_mlm == 0.0 and args.alpha_clm > 0.0)
     if args.mlm:
         assert os.path.isfile(args.token_counts)
-        assert (args.student_type in ["roberta", "distilbert"]) and (args.teacher_type in ["roberta", "bert", "auto"])
+        assert (args.student_type in ["roberta", "distilbert", "bert"]) and (args.teacher_type in ["roberta", "bert", "auto"])
     else:
         assert (args.student_type in ["gpt2"]) and (args.teacher_type in ["gpt2"])
 
@@ -117,7 +117,7 @@ def main():
     parser.add_argument(
         "--student_type",
         type=str,
-        choices=["distilbert", "roberta", "gpt2", "auto"],
+        choices=["distilbert", "roberta", "gpt2", "auto", "bert"],
         required=True,
         help="The student type (DistilBERT, RoBERTa).",
     )
