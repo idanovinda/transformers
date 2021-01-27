@@ -43,7 +43,7 @@ python -m torch.distributed.launch \
         --teacher_name bert-base-uncased \
         --alpha_ce 1.0 --alpha_mlm 0.0 --alpha_cos 0.0 --alpha_clm 0.0 --mlm \
         --freeze_pos_embs \
-        --dump_path /logs/distilbert/$FILENAME.init-bbu-0247911_label-bbu-original_ce-loss-1_distilbert \
+        --dump_path /logs/distilbert/$FILENAME.init-bbu-0247911_label-bbu-original_ce-loss-1_distilbert_teacher-trainable \
         --data_file $BASE_DIR/binarized_$FILENAME.bert-base-uncased.pickle \
         --token_counts $BASE_DIR/token_counts.bert-base-uncased.pickle \
         --checkpoint_epoch_interval 1 \
