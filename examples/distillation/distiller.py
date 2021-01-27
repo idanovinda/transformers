@@ -629,7 +629,7 @@ class Distiller:
             global_step=self.n_total_iter,
         )
         self.tensorboard.add_scalar(tag="losses/loss", scalar_value=self.last_loss, global_step=self.n_total_iter)
-        self.tensorboard.add_scalar(tag="teacher_loss", scalar_value=self.teacher_last_loss, global_step=self.n_total_iter)
+        self.tensorboard.add_scalar(tag="losses/teacher_loss", scalar_value=self.teacher_last_loss, global_step=self.n_total_iter)
         self.tensorboard.add_scalar(
             tag="losses/loss_ce", scalar_value=self.last_loss_ce, global_step=self.n_total_iter
         )
@@ -691,4 +691,9 @@ class Distiller:
         state_dict = mdl_to_save.state_dict()
         torch.save(state_dict, os.path.join(self.dump_path, dir, checkpoint_name))
         self.tokenizer.save_pretrained(os.path.join(self.dump_path, dir))
+
+        if self.params.teacher_trainable:
+            self.teacher.config.save_pretrained(os.path.join(self.dump_path, "teacher_"+dir))
+            torch.save(self.teacher.state_dict(), os.path.join(self.dump_path, "teacher_"+dir, checkpoint_name))
+            self.tokenizer.save_pretrained(os.path.join(self.dump_path, "teacher_"+dir))
         
