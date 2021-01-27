@@ -114,6 +114,7 @@ class Distiller:
             self.last_loss_cos = 0
         self.last_log = 0
 
+        self.teacher_last_loss = 0
         self.teacher_training = False
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
@@ -473,56 +474,60 @@ class Distiller:
             t_softmax = t_one_hot.clone()
             assert t_softmax.size() == s_logits_slct.size()
 
-        loss_ce = (
-            self.ce_loss_fct(
-                F.log_softmax(s_logits_slct / self.temperature, dim=-1),
-                t_softmax,
+        if self.teacher_training:
+            loss = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1)) 
+            self.teacher_last_loss += loss.item()
+        else:
+            loss_ce = (
+                self.ce_loss_fct(
+                    F.log_softmax(s_logits_slct / self.temperature, dim=-1),
+                    t_softmax,
+                )
+                * (self.temperature) ** 2
             )
-            * (self.temperature) ** 2
-        )
-        loss = self.alpha_ce * loss_ce
+            loss = self.alpha_ce * loss_ce
 
-        if self.alpha_mlm > 0.0:
-            loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
-            loss += self.alpha_mlm * loss_mlm
-        if self.alpha_clm > 0.0:
-            shift_logits = s_logits[..., :-1, :].contiguous()
-            shift_labels = lm_labels[..., 1:].contiguous()
-            loss_clm = self.lm_loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            loss += self.alpha_clm * loss_clm
+            if self.alpha_mlm > 0.0:
+                loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
+                loss += self.alpha_mlm * loss_mlm
+            if self.alpha_clm > 0.0:
+                shift_logits = s_logits[..., :-1, :].contiguous()
+                shift_labels = lm_labels[..., 1:].contiguous()
+                loss_clm = self.lm_loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                loss += self.alpha_clm * loss_clm
 
-        if self.alpha_mse > 0.0:
-            loss_mse = self.mse_loss_fct(s_logits_slct, t_logits_slct) / s_logits_slct.size(
-                0
-            )  # Reproducing batchmean reduction
-            loss += self.alpha_mse * loss_mse
-        if self.alpha_cos > 0.0:
-            s_hidden_states = s_hidden_states[-1]  # (bs, seq_length, dim)
-            t_hidden_states = t_hidden_states[-1]  # (bs, seq_length, dim)
-            mask = attention_mask.unsqueeze(-1).expand_as(s_hidden_states)  # (bs, seq_length, dim)
-            assert s_hidden_states.size() == t_hidden_states.size()
-            dim = s_hidden_states.size(-1)
+            if self.alpha_mse > 0.0:
+                loss_mse = self.mse_loss_fct(s_logits_slct, t_logits_slct) / s_logits_slct.size(
+                    0
+                )  # Reproducing batchmean reduction
+                loss += self.alpha_mse * loss_mse
+            if self.alpha_cos > 0.0:
+                s_hidden_states = s_hidden_states[-1]  # (bs, seq_length, dim)
+                t_hidden_states = t_hidden_states[-1]  # (bs, seq_length, dim)
+                mask = attention_mask.unsqueeze(-1).expand_as(s_hidden_states)  # (bs, seq_length, dim)
+                assert s_hidden_states.size() == t_hidden_states.size()
+                dim = s_hidden_states.size(-1)
 
-            s_hidden_states_slct = torch.masked_select(s_hidden_states, mask)  # (bs * seq_length * dim)
-            s_hidden_states_slct = s_hidden_states_slct.view(-1, dim)  # (bs * seq_length, dim)
-            t_hidden_states_slct = torch.masked_select(t_hidden_states, mask)  # (bs * seq_length * dim)
-            t_hidden_states_slct = t_hidden_states_slct.view(-1, dim)  # (bs * seq_length, dim)
+                s_hidden_states_slct = torch.masked_select(s_hidden_states, mask)  # (bs * seq_length * dim)
+                s_hidden_states_slct = s_hidden_states_slct.view(-1, dim)  # (bs * seq_length, dim)
+                t_hidden_states_slct = torch.masked_select(t_hidden_states, mask)  # (bs * seq_length * dim)
+                t_hidden_states_slct = t_hidden_states_slct.view(-1, dim)  # (bs * seq_length, dim)
 
-            target = s_hidden_states_slct.new(s_hidden_states_slct.size(0)).fill_(1)  # (bs * seq_length,)
-            loss_cos = self.cosine_loss_fct(s_hidden_states_slct, t_hidden_states_slct, target)
-            loss += self.alpha_cos * loss_cos
+                target = s_hidden_states_slct.new(s_hidden_states_slct.size(0)).fill_(1)  # (bs * seq_length,)
+                loss_cos = self.cosine_loss_fct(s_hidden_states_slct, t_hidden_states_slct, target)
+                loss += self.alpha_cos * loss_cos
 
-        self.total_loss_epoch += loss.item()
-        self.last_loss = loss.item()
-        self.last_loss_ce = loss_ce.item()
-        if self.alpha_mlm > 0.0:
-            self.last_loss_mlm = loss_mlm.item()
-        if self.alpha_clm > 0.0:
-            self.last_loss_clm = loss_clm.item()
-        if self.alpha_mse > 0.0:
-            self.last_loss_mse = loss_mse.item()
-        if self.alpha_cos > 0.0:
-            self.last_loss_cos = loss_cos.item()
+            self.total_loss_epoch += loss.item()
+            self.last_loss = loss.item()
+            self.last_loss_ce = loss_ce.item()
+            if self.alpha_mlm > 0.0:
+                self.last_loss_mlm = loss_mlm.item()
+            if self.alpha_clm > 0.0:
+                self.last_loss_clm = loss_clm.item()
+            if self.alpha_mse > 0.0:
+                self.last_loss_mse = loss_mse.item()
+            if self.alpha_cos > 0.0:
+                self.last_loss_cos = loss_cos.item()
 
         self.optimize(loss)
 
@@ -564,7 +569,6 @@ class Distiller:
                     self.optimizer_teacher.zero_grad()
                     self.scheduler_teacher.step()
                     self.teacher_training = False
-                    print(">> teacher training")
                 else:
                     if self.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
@@ -574,7 +578,6 @@ class Distiller:
                     self.optimizer.zero_grad()
                     self.scheduler.step()
                     self.teacher_training = True
-                    print(">> student training")
             else:
                 if self.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
@@ -626,6 +629,7 @@ class Distiller:
             global_step=self.n_total_iter,
         )
         self.tensorboard.add_scalar(tag="losses/loss", scalar_value=self.last_loss, global_step=self.n_total_iter)
+        self.tensorboard.add_scalar(tag="teacher_loss", scalar_value=self.teacher_last_loss, global_step=self.n_total_iter)
         self.tensorboard.add_scalar(
             tag="losses/loss_ce", scalar_value=self.last_loss_ce, global_step=self.n_total_iter
         )

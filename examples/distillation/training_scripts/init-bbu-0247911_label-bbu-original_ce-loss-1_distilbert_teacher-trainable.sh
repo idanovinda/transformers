@@ -32,7 +32,7 @@ python -m torch.distributed.launch \
     --nnodes=$N_NODES \
     --node_rank $NODE_RANK \
     train.py \
-	--gradient_accumulation_steps 100 \
+	--gradient_accumulation_steps 125 \
 	--n_epoch $EPOCH \
         --force \
         --gpus $WORLD_SIZE \
@@ -49,5 +49,6 @@ python -m torch.distributed.launch \
         --checkpoint_epoch_interval 1 \
         --student_pretrained_weights /logs/weight_initialization/bert-base-uncased_0247911.pth \
         --teacher_distribution original \
-        --teacher_trainable
+        --teacher_trainable \
+        --batch_size 4
 fi
