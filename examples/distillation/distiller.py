@@ -164,7 +164,7 @@ class Distiller:
             "------ Number of trainable parameters (teacher): %i"
             % sum([p.numel() for p in self.teacher.parameters() if p.requires_grad])
         )
-        logger.info("------ Number of parameters (teacher): %i" % sum([p.numel() for p in self.student.parameters()]))
+        logger.info("------ Number of parameters (teacher): %i" % sum([p.numel() for p in self.teacher.parameters()]))
         self.optimizer_teacher = AdamW(
             self.teacher.parameters(), lr=params.learning_rate, eps=params.adam_epsilon, betas=(0.9, 0.98)
         )
