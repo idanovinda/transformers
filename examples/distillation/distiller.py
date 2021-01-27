@@ -114,6 +114,8 @@ class Distiller:
             self.last_loss_cos = 0
         self.last_log = 0
 
+        self.teacher_training = False
+
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.lm_loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
         if self.alpha_mse > 0.0:
@@ -155,6 +157,19 @@ class Distiller:
         warmup_steps = math.ceil(num_train_optimization_steps * params.warmup_prop)
         self.scheduler = get_linear_schedule_with_warmup(
             self.optimizer, num_warmup_steps=warmup_steps, num_training_steps=num_train_optimization_steps
+        )
+
+        logger.info(
+            "------ Number of trainable parameters (teacher): %i"
+            % sum([p.numel() for p in self.teacher.parameters() if p.requires_grad])
+        )
+        logger.info("------ Number of parameters (teacher): %i" % sum([p.numel() for p in self.student.parameters()]))
+        self.optimizer_teacher = AdamW(
+            self.teacher.parameters(), lr=params.learning_rate, eps=params.adam_epsilon, betas=(0.9, 0.98)
+        )
+
+        self.scheduler_teacher = get_linear_schedule_with_warmup(
+            self.optimizer_teacher, num_warmup_steps=warmup_steps, num_training_steps=num_train_optimization_steps
         )
 
         if self.fp16:
@@ -341,7 +356,10 @@ class Distiller:
             logger.info("Starting training")
         self.last_log = time.time()
         self.student.train()
-        self.teacher.eval()
+        if self.params.teacher_trainable:
+            self.teacher.train()
+        else:
+            self.teacher.eval()
 
         for _ in range(self.params.n_epoch):
             if self.is_master:
@@ -393,18 +411,28 @@ class Distiller:
             s_logits, s_hidden_states = self.student(
                 input_ids=input_ids, attention_mask=attention_mask
             )  # (bs, seq_length, voc_size)
-            with torch.no_grad():
+            if self.params.teacher_trainable:
                 t_logits, t_hidden_states = self.teacher(
                     input_ids=input_ids, attention_mask=attention_mask
-                )  # (bs, seq_length, voc_size)
+                )
+            else:
+                with torch.no_grad():
+                    t_logits, t_hidden_states = self.teacher(
+                        input_ids=input_ids, attention_mask=attention_mask
+                    )  # (bs, seq_length, voc_size)
         else:
             s_logits, _, s_hidden_states = self.student(
                 input_ids=input_ids, attention_mask=None
             )  # (bs, seq_length, voc_size)
-            with torch.no_grad():
+            if self.params.teacher_trainable:
                 t_logits, _, t_hidden_states = self.teacher(
                     input_ids=input_ids, attention_mask=None
                 )  # (bs, seq_length, voc_size)
+            else:
+                with torch.no_grad():
+                    t_logits, _, t_hidden_states = self.teacher(
+                        input_ids=input_ids, attention_mask=None
+                    )  # (bs, seq_length, voc_size)
         assert s_logits.size() == t_logits.size()
 
         # https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py#L100
@@ -523,16 +551,38 @@ class Distiller:
                 scaled_loss.backward()
         else:
             loss.backward()
-
+    
         self.iter()
         if self.n_iter % self.params.gradient_accumulation_steps == 0:
-            if self.fp16:
-                torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+            if self.params.teacher_trainable:
+                if self.teacher_training:
+                    if self.fp16:
+                        torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                    else:
+                        torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
+                    self.optimizer_teacher.step()
+                    self.optimizer_teacher.zero_grad()
+                    self.scheduler_teacher.step()
+                    self.teacher_training = False
+                    print(">> teacher training")
+                else:
+                    if self.fp16:
+                        torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                    else:
+                        torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    self.scheduler.step()
+                    self.teacher_training = True
+                    print(">> student training")
             else:
-                torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-            self.scheduler.step()
+                if self.fp16:
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                else:
+                    torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                self.scheduler.step()
 
     def iter(self):
         """
