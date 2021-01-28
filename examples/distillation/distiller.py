@@ -115,6 +115,7 @@ class Distiller:
         self.last_log = 0
 
         self.teacher_last_loss = 0
+        self.teacher_total_loss_epoch = 0
         self.teacher_training = False
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
@@ -476,7 +477,8 @@ class Distiller:
 
         if self.teacher_training:
             loss = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1)) 
-            self.teacher_last_loss += loss.item()
+            self.teacher_last_loss = loss.item()
+            self.teacher_total_loss_epoch += loss.item()
         else:
             loss_ce = (
                 self.ce_loss_fct(
@@ -628,6 +630,11 @@ class Distiller:
             scalar_value=self.total_loss_epoch / self.n_iter,
             global_step=self.n_total_iter,
         )
+        self.tensorboard.add_scalar(
+            tag="losses/teacher_cum_avg_loss_epoch",
+            scalar_value=self.teacher_total_loss_epoch / self.n_iter,
+            global_step=self.n_total_iter,
+        )
         self.tensorboard.add_scalar(tag="losses/loss", scalar_value=self.last_loss, global_step=self.n_total_iter)
         self.tensorboard.add_scalar(tag="losses/teacher_loss", scalar_value=self.teacher_last_loss, global_step=self.n_total_iter)
         self.tensorboard.add_scalar(
@@ -674,11 +681,15 @@ class Distiller:
             self.tensorboard.add_scalar(
                 tag="epoch/loss", scalar_value=self.total_loss_epoch / self.n_iter, global_step=self.epoch
             )
+            self.tensorboard.add_scalar(
+                tag="epoch/teacher_loss", scalar_value=self.teacher_total_loss_epoch / self.n_iter, global_step=self.epoch
+            )
 
         self.epoch += 1
         self.n_sequences_epoch = 0
         self.n_iter = 0
         self.total_loss_epoch = 0
+        self.teacher_total_loss_epoch = 0
 
     def save_checkpoint(self, checkpoint_name: str = "checkpoint.pth", dir: str =''):
         """
@@ -692,7 +703,7 @@ class Distiller:
         torch.save(state_dict, os.path.join(self.dump_path, dir, checkpoint_name))
         self.tokenizer.save_pretrained(os.path.join(self.dump_path, dir))
 
-        if self.params.teacher_trainable:
+        if (self.params.teacher_trainable) and (dir != ''):
             self.teacher.config.save_pretrained(os.path.join(self.dump_path, "teacher_"+dir))
             torch.save(self.teacher.state_dict(), os.path.join(self.dump_path, "teacher_"+dir, checkpoint_name))
             self.tokenizer.save_pretrained(os.path.join(self.dump_path, "teacher_"+dir))
