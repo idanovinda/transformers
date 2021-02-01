@@ -574,7 +574,7 @@ class Distiller:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self.scheduler.step()
-                    if self.n_iter % (self.params.gradient_accumulation_steps*1000) == 0:
+                    if self.n_iter % (self.params.gradient_accumulation_steps*100) == 0:
                         self.teacher_training = True
             else:
                 if self.fp16:
