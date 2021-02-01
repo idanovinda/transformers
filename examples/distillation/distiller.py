@@ -413,7 +413,7 @@ class Distiller:
             s_logits, s_hidden_states = self.student(
                 input_ids=input_ids, attention_mask=attention_mask
             )  # (bs, seq_length, voc_size)
-            if self.params.teacher_trainable:
+            if self.params.teacher_trainable and self.teacher_training:
                 t_logits, t_hidden_states = self.teacher(
                     input_ids=input_ids, attention_mask=attention_mask
                 )
@@ -426,15 +426,10 @@ class Distiller:
             s_logits, _, s_hidden_states = self.student(
                 input_ids=input_ids, attention_mask=None
             )  # (bs, seq_length, voc_size)
-            if self.params.teacher_trainable:
+            with torch.no_grad():
                 t_logits, _, t_hidden_states = self.teacher(
                     input_ids=input_ids, attention_mask=None
                 )  # (bs, seq_length, voc_size)
-            else:
-                with torch.no_grad():
-                    t_logits, _, t_hidden_states = self.teacher(
-                        input_ids=input_ids, attention_mask=None
-                    )  # (bs, seq_length, voc_size)
         assert s_logits.size() == t_logits.size()
 
         # https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py#L100
@@ -579,7 +574,8 @@ class Distiller:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self.scheduler.step()
-                    self.teacher_training = True
+                    if self.n_iter % (self.params.gradient_accumulation_steps*1000) == 0:
+                        self.teacher_training = True
             else:
                 if self.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
