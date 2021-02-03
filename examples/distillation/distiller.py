@@ -117,6 +117,7 @@ class Distiller:
         self.teacher_last_loss = 0
         self.teacher_total_loss_epoch = 0
         self.teacher_training = False
+        self.student_on_l_new = 0
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.lm_loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
@@ -413,7 +414,7 @@ class Distiller:
             s_logits, s_hidden_states = self.student(
                 input_ids=input_ids, attention_mask=attention_mask
             )  # (bs, seq_length, voc_size)
-            if self.params.teacher_trainable and self.teacher_training:
+            if self.params.teacher_trainable:
                 t_logits, t_hidden_states = self.teacher(
                     input_ids=input_ids, attention_mask=attention_mask
                 )
@@ -474,6 +475,10 @@ class Distiller:
             loss = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1)) 
             self.teacher_last_loss = loss.item()
             self.teacher_total_loss_epoch += loss.item()
+            if self.multi_gpu:
+                self.student_on_l_new += loss.mean()
+            else:
+                self.student_on_l_new += loss
         else:
             loss_ce = (
                 self.ce_loss_fct(
@@ -562,9 +567,15 @@ class Distiller:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
                     else:
                         torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
+                    if self.params.gradient_accumulation_steps > 1:
+                        self.student_on_l_new = self.student_on_l_new / self.params.gradient_accumulation_steps
+                    for param_name, param in self.teacher.named_parameters():
+                        param.grad = self.student_on_l_new.item() * param.grad
+                    self.student_on_l_new = 0
                     self.optimizer_teacher.step()
                     self.optimizer_teacher.zero_grad()
                     self.scheduler_teacher.step()
+                    self.optimizer.zero_grad() # delete gradient on student 
                     self.teacher_training = False
                 else:
                     if self.fp16:
@@ -574,7 +585,7 @@ class Distiller:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self.scheduler.step()
-                    if self.n_iter % (self.params.gradient_accumulation_steps*100) == 0:
+                    if self.n_iter % (self.params.gradient_accumulation_steps) == 0:
                         self.teacher_training = True
             else:
                 if self.fp16:
