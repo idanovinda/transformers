@@ -228,6 +228,7 @@ def main():
     parser.add_argument("--teacher_distribution", type=str, default="original", help="How to change the teacher distribution on student training (uniform, shuffle)")
     parser.add_argument('--remove_layers', type=str, default='', help="specify layer numbers to remove during finetuning e.g. 0,1,2 to remove first three layers")
     parser.add_argument("--teacher_trainable", action="store_true", help="Whether to update the teacher")
+    parser.add_argument("--student_step", type=int, default=1, help="Specidy the number of updating student before update teacher")
 
     args = parser.parse_args()
     sanity_checks(args)
