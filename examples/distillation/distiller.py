@@ -33,7 +33,7 @@ from grouped_batch_sampler import GroupedBatchSampler, create_lengths_groups
 from lm_seqs_dataset import LmSeqsDataset
 from transformers import get_linear_schedule_with_warmup
 from utils import logger
-
+from lm_seqs_dataset import LmSeqsDataset
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -74,8 +74,8 @@ class Distiller:
             sampler = BatchSampler(sampler=sampler, batch_size=params.batch_size, drop_last=False)
 
         self.dataloader = DataLoader(dataset=dataset, batch_sampler=sampler, collate_fn=dataset.batch_sequences)
-
         self.temperature = params.temperature
+        self.dataset = dataset
         assert self.temperature > 0.0
 
         self.alpha_ce = params.alpha_ce
@@ -118,6 +118,8 @@ class Distiller:
         self.teacher_total_loss_epoch = 0
         self.teacher_training = False
         self.student_on_l_new = 0
+        self.student_on_l_old = 0
+        self.student_updated = False
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.lm_loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
@@ -381,6 +383,51 @@ class Distiller:
                     token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch)
                 self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
 
+                if self.teacher_training:
+                    num_data_to_sampling = self.params.gpus * self.params.batch_size * self.params.gradient_accumulation_steps
+                    index_to_sampling = torch.randperm(len(self.dataset))[:num_data_to_sampling]
+                    subset = LmSeqsDataset(self.params, self.dataset.__getitem__(index_to_sampling)[0])
+
+                    if self.params.gpus <= 1:
+                        sampler = RandomSampler(subset)
+                    else:
+                        sampler = DistributedSampler(subset)
+                    if self.params.group_by_size:
+                        groups = create_lengths_groups(lengths=subset.lengths, k=self.params.max_model_input_size)
+                        sampler = GroupedBatchSampler(sampler=sampler, group_ids=groups, batch_size=self.params.batch_size)
+                    else:
+                        sampler = BatchSampler(sampler=sampler, batch_size=self.params.batch_size, drop_last=False)
+
+                    labeled_dataloader = DataLoader(dataset=subset, batch_sampler=sampler, collate_fn=subset.batch_sequences)
+                    
+                    # computed labeled batch in old student 
+                    # iter_bar_labeled_dataset = tqdm(self.labeled_dataloader, desc="-Iter", disable=self.params.local_rank not in [-1, 0])
+                    for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
+                        if self.params.gpus > 0:
+                            batch_labeled = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch_labeled)
+
+                        if self.mlm:
+                            token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch_labeled)
+                        else:
+                            token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
+                        self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
+                        if self.student_updated:
+                            break
+
+                    # compute labeled batch in new student
+                    for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
+                        if self.params.gpus > 0:
+                            batch_labeled = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch_labeled)
+
+                        if self.mlm:
+                            token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch_labeled)
+                        else:
+                            token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
+                        self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
+                        if self.teacher_training == False:
+                            break
+
+
                 iter_bar.update()
                 iter_bar.set_postfix(
                     {"Last_loss": f"{self.last_loss:.2f}", "Avg_cum_loss": f"{self.total_loss_epoch/self.n_iter:.2f}"}
@@ -411,18 +458,21 @@ class Distiller:
         lm_labels: `torch.tensor(bs, seq_length)` - The language modeling labels (mlm labels for MLM and clm labels for CLM).
         """
         if self.mlm:
-            s_logits, s_hidden_states = self.student(
-                input_ids=input_ids, attention_mask=attention_mask
-            )  # (bs, seq_length, voc_size)
-            if self.params.teacher_trainable:
-                t_logits, t_hidden_states = self.teacher(
-                    input_ids=input_ids, attention_mask=attention_mask
-                )
-            else:
+            if self.teacher_training:
                 with torch.no_grad():
-                    t_logits, t_hidden_states = self.teacher(
+                    s_logits, s_hidden_states = self.student(
                         input_ids=input_ids, attention_mask=attention_mask
                     )  # (bs, seq_length, voc_size)
+                    t_logits, t_hidden_states = self.teacher(
+                        input_ids=input_ids, attention_mask=attention_mask
+                    )
+            else:
+                s_logits, s_hidden_states = self.student(
+                    input_ids=input_ids, attention_mask=attention_mask
+                )  # (bs, seq_length, voc_size)
+                t_logits, t_hidden_states = self.teacher(
+                    input_ids=input_ids, attention_mask=attention_mask
+                )  # (bs, seq_length, voc_size)
         else:
             s_logits, _, s_hidden_states = self.student(
                 input_ids=input_ids, attention_mask=None
@@ -473,12 +523,18 @@ class Distiller:
 
         if self.teacher_training:
             loss = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1)) 
-            self.teacher_last_loss = loss.item()
-            self.teacher_total_loss_epoch += loss.item()
-            if self.multi_gpu:
-                self.student_on_l_new += loss.mean()
+            if self.student_updated:
+                self.teacher_last_loss = loss.item()
+                self.teacher_total_loss_epoch += loss.item()
+                if self.multi_gpu:
+                    self.student_on_l_new += loss.mean()
+                else:
+                    self.student_on_l_new += loss
             else:
-                self.student_on_l_new += loss
+                if self.multi_gpu:
+                    self.student_on_l_old += loss.mean()
+                else:
+                    self.student_on_l_old += loss
         else:
             loss_ce = (
                 self.ce_loss_fct(
@@ -551,43 +607,61 @@ class Distiller:
         if self.params.gradient_accumulation_steps > 1:
             loss = loss / self.params.gradient_accumulation_steps
 
-        if self.fp16:
-            from apex import amp
-
-            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            loss.backward()
     
         self.iter()
         if self.n_iter % self.params.gradient_accumulation_steps == 0:
             if self.params.teacher_trainable:
                 if self.teacher_training:
-                    if self.fp16:
-                        torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                    if self.student_updated:
+                        if self.fp16:
+                            torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                        else:
+                            torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
+                        if self.params.gradient_accumulation_steps > 1:
+                            dot_product = (self.student_on_l_new - self.student_on_l_old) / self.params.gradient_accumulation_steps
+                        for param_name, param in self.teacher.named_parameters():
+                            param.grad = dot_product.item() * param.grad
+                        self.student_on_l_new = 0
+                        self.student_on_l_old = 0
+                        self.optimizer_teacher.step()
+                        self.optimizer_teacher.zero_grad()
+                        self.scheduler_teacher.step()
+                        self.teacher_training = False
+                        self.student_updated = False
                     else:
-                        torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
-                    if self.params.gradient_accumulation_steps > 1:
-                        self.student_on_l_new = self.student_on_l_new / self.params.gradient_accumulation_steps
-                    for param_name, param in self.teacher.named_parameters():
-                        param.grad = self.student_on_l_new.item() * param.grad
-                    self.student_on_l_new = 0
-                    self.optimizer_teacher.step()
-                    self.optimizer_teacher.zero_grad()
-                    self.scheduler_teacher.step()
-                    self.optimizer.zero_grad() # delete gradient on student 
-                    self.teacher_training = False
+                        if self.fp16:
+                            torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                        else:
+                            torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
+                        self.scheduler.step()
+                        self.student_updated = True
                 else:
                     if self.fp16:
-                        torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                        from apex import amp
+
+                        with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                            scaled_loss.backward()
                     else:
-                        torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
-                    self.optimizer.step()
-                    self.optimizer.zero_grad()
-                    self.scheduler.step()
+                        loss.backward()
+                    # if self.fp16:
+                    #     torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                    # else:
+                    #     torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
+                    # self.optimizer.step()
+                    # self.optimizer.zero_grad()
+                    # self.scheduler.step()
                     if self.n_iter % (self.params.gradient_accumulation_steps) == 0:
                         self.teacher_training = True
             else:
+                if self.fp16:
+                    from apex import amp
+
+                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                else:
+                    loss.backward()
                 if self.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
                 else:

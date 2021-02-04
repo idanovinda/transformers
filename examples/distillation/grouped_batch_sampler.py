@@ -37,8 +37,8 @@ def create_lengths_groups(lengths, k=0):
     # count number of elements per group
     counts = np.unique(groups, return_counts=True)[1]
     fbins = [0] + bins + [np.inf]
-    logger.info("Using {} as bins for aspect lengths quantization".format(fbins))
-    logger.info("Count of instances per bin: {}".format(counts))
+    # logger.info("Using {} as bins for aspect lengths quantization".format(fbins))
+    # logger.info("Count of instances per bin: {}".format(counts))
     return groups
 
 

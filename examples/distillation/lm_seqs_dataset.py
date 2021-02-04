@@ -65,7 +65,7 @@ class LmSeqsDataset(Dataset):
         """
         max_len = self.params.max_model_input_size
         indices = self.lengths > max_len
-        logger.info(f"Splitting {sum(indices)} too long sequences.")
+        # logger.info(f"Splitting {sum(indices)} too long sequences.")
 
         def divide_chunks(l, n):
             return [l[i : i + n] for i in range(0, len(l), n)]
@@ -108,7 +108,7 @@ class LmSeqsDataset(Dataset):
         self.token_ids = self.token_ids[indices]
         self.lengths = self.lengths[indices]
         new_size = len(self)
-        logger.info(f"Remove {init_size - new_size} too short (<=11 tokens) sequences.")
+        # logger.info(f"Remove {init_size - new_size} too short (<=11 tokens) sequences.")
 
     def remove_unknown_sequences(self):
         """
@@ -124,7 +124,7 @@ class LmSeqsDataset(Dataset):
         self.token_ids = self.token_ids[indices]
         self.lengths = self.lengths[indices]
         new_size = len(self)
-        logger.info(f"Remove {init_size - new_size} sequences with a high level of unknown tokens (50%).")
+        # logger.info(f"Remove {init_size - new_size} sequences with a high level of unknown tokens (50%).")
 
     def print_statistics(self):
         """
@@ -132,7 +132,7 @@ class LmSeqsDataset(Dataset):
         """
         if not self.params.is_master:
             return
-        logger.info(f"{len(self)} sequences")
+        # logger.info(f"{len(self)} sequences")
         # data_len = sum(self.lengths)
         # nb_unique_tokens = len(Counter(list(chain(*self.token_ids))))
         # logger.info(f'{data_len} tokens ({nb_unique_tokens} unique)')
