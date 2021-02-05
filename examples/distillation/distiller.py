@@ -43,7 +43,7 @@ except ImportError:
 
 class Distiller:
     def __init__(
-        self, params: dict, dataset: LmSeqsDataset, token_probs: torch.tensor, student: nn.Module, teacher: nn.Module, tokenizer: nn.Module
+        self, params: dict, dataset: LmSeqsDataset, token_probs: torch.tensor, student: nn.Module, teacher: nn.Module, tokenizer: nn.Module, labeled_dataset: LmSeqsDataset = None
     ):
         logger.info("Initializing Distiller")
         self.params = params
@@ -76,6 +76,7 @@ class Distiller:
         self.dataloader = DataLoader(dataset=dataset, batch_sampler=sampler, collate_fn=dataset.batch_sequences)
         self.temperature = params.temperature
         self.dataset = dataset
+        self.labeled_dataset = labeled_dataset
         assert self.temperature > 0.0
 
         self.alpha_ce = params.alpha_ce
@@ -386,8 +387,8 @@ class Distiller:
 
                 if self.teacher_training:
                     num_data_to_sampling = self.params.gpus * self.params.batch_size * self.params.gradient_accumulation_steps
-                    index_to_sampling = torch.randperm(len(self.dataset))[:num_data_to_sampling]
-                    subset = LmSeqsDataset(self.params, self.dataset.__getitem__(index_to_sampling)[0])
+                    index_to_sampling = torch.randperm(len(self.labeled_dataset))[:num_data_to_sampling]
+                    subset = LmSeqsDataset(self.params, self.labeled_dataset.__getitem__(index_to_sampling)[0])
 
                     if self.params.gpus <= 1:
                         sampler = RandomSampler(subset)

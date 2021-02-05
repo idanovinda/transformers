@@ -21,7 +21,16 @@ if [ $BINARIZED -eq 1 ]; then
     --data_file $BASE_DIR/binarized_$FILENAME.bert-base-uncased.pickle \
     --token_counts_dump $BASE_DIR/token_counts.bert-base-uncased.pickle \
     --vocab_size 30522
+
+    python scripts/binarized_data.py \
+    --file_path /datasets/glue_four/glue_four.txt \
+    --tokenizer_type bert \
+    --tokenizer_name bert-base-uncased \
+    --cache_dir $CACHE_DIR \
+    --dump_file /datasets/glue_four/binarized_glue_four
+
 fi
+
 
 pkill -f 'python -u train.py'
 
@@ -34,7 +43,6 @@ python -m torch.distributed.launch \
     train.py \
 	--gradient_accumulation_steps 125 \
 	--n_epoch $EPOCH \
-        --force \
         --gpus $WORLD_SIZE \
         --student_type distilbert \
         --student_config training_configs/distilbert-base-uncased.json \
@@ -43,7 +51,7 @@ python -m torch.distributed.launch \
         --teacher_name bert-base-uncased \
         --alpha_ce 1.0 --alpha_mlm 0.0 --alpha_cos 0.0 --alpha_clm 0.0 --mlm \
         --freeze_pos_embs \
-        --dump_path /logs/distilbert/$FILENAME.init-bbu-0247911_label-bbu-original_ce-loss-1_distilbert_teacher-trainable_s-100_t-1 \
+        --dump_path /logs/distilbert/$FILENAME.init-bbu-0247911_label-bbu-original_ce-loss-1_distilbert_teacher-trainable_s-100_t-1_glue-four \
         --data_file $BASE_DIR/binarized_$FILENAME.bert-base-uncased.pickle \
         --token_counts $BASE_DIR/token_counts.bert-base-uncased.pickle \
         --checkpoint_epoch_interval 1 \
@@ -51,5 +59,6 @@ python -m torch.distributed.launch \
         --teacher_distribution original \
         --teacher_trainable \
         --batch_size 4 \
-        --student_step 100
+        --student_step 100 \
+        --labeled_data /datasets/glue_four/binarized_glue_four.bert-base-uncased.pickle
 fi

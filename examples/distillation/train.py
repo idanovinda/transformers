@@ -229,6 +229,7 @@ def main():
     parser.add_argument('--remove_layers', type=str, default='', help="specify layer numbers to remove during finetuning e.g. 0,1,2 to remove first three layers")
     parser.add_argument("--teacher_trainable", action="store_true", help="Whether to update the teacher")
     parser.add_argument("--student_step", type=int, default=1, help="Specidy the number of updating student before update teacher")
+    parser.add_argument("--labeled_data", type=str, default='', help="")
 
     args = parser.parse_args()
     sanity_checks(args)
@@ -289,8 +290,16 @@ def main():
     else:
         token_probs = None
 
+    if args.teacher_trainable:
+        logger.info(f"Loading labeled data from {args.labeled_data}")
+        with open(args.labeled_data, "rb") as fp:
+            labeled_data = pickle.load(fp)
+        
+        labeled_lm_seq_dataset = LmSeqsDataset(params=args, data=labeled_data)
+
     train_lm_seq_dataset = LmSeqsDataset(params=args, data=data)
     logger.info("Data loader created.")
+
 
     # STUDENT #
     logger.info(f"Loading student config from {args.student_config}")
@@ -348,9 +357,14 @@ def main():
 
     # DISTILLER #
     torch.cuda.empty_cache()
-    distiller = Distiller(
-        params=args, dataset=train_lm_seq_dataset, token_probs=token_probs, student=student, teacher=teacher, tokenizer=tokenizer
-    )
+    if args.teacher_trainable:
+        distiller = Distiller(
+            params=args, dataset=train_lm_seq_dataset, token_probs=token_probs, student=student, teacher=teacher, tokenizer=tokenizer, labeled_dataset=labeled_lm_seq_dataset
+        )
+    else:
+        distiller = Distiller(
+            params=args, dataset=train_lm_seq_dataset, token_probs=token_probs, student=student, teacher=teacher, tokenizer=tokenizer
+        )
     distiller.train()
     logger.info("Let's go get some drinks.")
     # logger.info(f"Agreement proportion {distiller.agreement_sum/distiller.agreement_len}")
