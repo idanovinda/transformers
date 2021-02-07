@@ -454,7 +454,7 @@ class Distiller:
         lm_labels: `torch.tensor(bs, seq_length)` - The language modeling labels (mlm labels for MLM and clm labels for CLM).
         """
         if self.mlm:
-            if self.teacher_training:
+            if self.teacher_training and self.student_updated:
                 with torch.no_grad():
                     s_logits, s_hidden_states = self.student(
                         input_ids=input_ids, attention_mask=attention_mask
@@ -462,13 +462,22 @@ class Distiller:
                     t_logits, t_hidden_states = self.teacher(
                         input_ids=input_ids, attention_mask=attention_mask
                     )
+            elif self.teacher_training:
+                with torch.no_grad():
+                    s_logits, s_hidden_states = self.student(
+                        input_ids=input_ids, attention_mask=attention_mask
+                    )  # (bs, seq_length, voc_size)
+                t_logits, t_hidden_states = self.teacher(
+                    input_ids=input_ids, attention_mask=attention_mask
+                )
             else:
                 s_logits, s_hidden_states = self.student(
                     input_ids=input_ids, attention_mask=attention_mask
                 )  # (bs, seq_length, voc_size)
-                t_logits, t_hidden_states = self.teacher(
-                    input_ids=input_ids, attention_mask=attention_mask
-                )  # (bs, seq_length, voc_size)
+                with torch.no_grad():
+                    t_logits, t_hidden_states = self.teacher(
+                        input_ids=input_ids, attention_mask=attention_mask
+                    )  # (bs, seq_length, voc_size)
         else:
             s_logits, _, s_hidden_states = self.student(
                 input_ids=input_ids, attention_mask=None
@@ -614,7 +623,7 @@ class Distiller:
                     if self.params.gradient_accumulation_steps > 1:
                         dot_product = (self.student_on_l_new - self.student_on_l_old) / self.params.gradient_accumulation_steps
                     for param_name, param in self.teacher.named_parameters():
-                        param.grad = dot_product.item() * param.grad / (self.params.student_step)
+                        param.grad = dot_product.item() * param.grad 
                     self.student_on_l_new = 0
                     self.student_on_l_old = 0
                     self.optimizer_teacher.step()
