@@ -527,19 +527,27 @@ class Distiller:
             assert t_softmax.size() == s_logits_slct.size()
 
         if self.teacher_training:
-            loss = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1)) 
+            loss_ce = (
+                self.ce_loss_fct(
+                    F.log_softmax(s_logits_slct / self.temperature, dim=-1),
+                    t_softmax,
+                )
+                * (self.temperature) ** 2
+            )
+            loss = self.alpha_ce * loss_ce 
+            loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
             if self.student_updated:
-                self.teacher_last_loss = loss.item()
-                self.teacher_total_loss_epoch += loss.item()
+                self.teacher_last_loss = loss_mlm.item()
+                self.teacher_total_loss_epoch += loss_mlm.item()
                 if self.multi_gpu:
-                    self.student_on_l_new += loss.mean()
+                    self.student_on_l_new += loss_mlm.mean()
                 else:
-                    self.student_on_l_new += loss
+                    self.student_on_l_new += loss_mlm
             else:
                 if self.multi_gpu:
-                    self.student_on_l_old += loss.mean()
+                    self.student_on_l_old += loss_mlm.mean()
                 else:
-                    self.student_on_l_old += loss
+                    self.student_on_l_old += loss_mlm
         else:
             loss_ce = (
                 self.ce_loss_fct(
