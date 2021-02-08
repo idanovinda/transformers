@@ -76,7 +76,8 @@ class Distiller:
         self.dataloader = DataLoader(dataset=dataset, batch_sampler=sampler, collate_fn=dataset.batch_sequences)
         self.temperature = params.temperature
         self.dataset = dataset
-        self.labeled_dataset = labeled_dataset
+        if self.params.teacher_trainable:
+            self.labeled_dataset = labeled_dataset
         assert self.temperature > 0.0
 
         self.alpha_ce = params.alpha_ce
@@ -458,18 +459,18 @@ class Distiller:
                 with torch.no_grad():
                     s_logits, s_hidden_states = self.student(
                         input_ids=input_ids, attention_mask=attention_mask
-                    )  # (bs, seq_length, voc_size)
-                    t_logits, t_hidden_states = self.teacher(
-                        input_ids=input_ids, attention_mask=attention_mask
-                    )
+                    )  
+                t_logits, t_hidden_states = self.teacher(
+                    input_ids=input_ids, attention_mask=attention_mask
+                )
             elif self.teacher_training:
                 with torch.no_grad():
                     s_logits, s_hidden_states = self.student(
                         input_ids=input_ids, attention_mask=attention_mask
                     )  # (bs, seq_length, voc_size)
-                t_logits, t_hidden_states = self.teacher(
-                    input_ids=input_ids, attention_mask=attention_mask
-                )
+                    t_logits, t_hidden_states = self.teacher(
+                        input_ids=input_ids, attention_mask=attention_mask
+                    )
             else:
                 s_logits, s_hidden_states = self.student(
                     input_ids=input_ids, attention_mask=attention_mask
@@ -527,15 +528,8 @@ class Distiller:
             assert t_softmax.size() == s_logits_slct.size()
 
         if self.teacher_training:
-            loss_ce = (
-                self.ce_loss_fct(
-                    F.log_softmax(s_logits_slct / self.temperature, dim=-1),
-                    t_softmax,
-                )
-                * (self.temperature) ** 2
-            )
-            loss = self.alpha_ce * loss_ce 
             loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
+            loss = self.alpha_ce * loss_mlm
             if self.student_updated:
                 self.teacher_last_loss = loss_mlm.item()
                 self.teacher_total_loss_epoch += loss_mlm.item()
@@ -549,6 +543,23 @@ class Distiller:
                 else:
                     self.student_on_l_old += loss_mlm
         else:
+            # for teacher mpl loss
+            if self.params.teacher_trainable:
+                t_logits_new, t_hidden_states_new = self.teacher(
+                        input_ids=input_ids, attention_mask=attention_mask
+                    )
+                t_logits_slct_new = torch.masked_select(t_logits_new, mask).view(-1, s_logits.size(-1))
+                assert t_logits_slct.size() == t_logits_slct_new.size()
+                teacher_loss = self.ce_loss_fct(
+                                    F.softmax(t_logits_slct_new / self.temperature, dim=-1),
+                                    t_softmax)* (self.temperature) ** 2
+
+                if self.multi_gpu:
+                    teacher_loss = teacher_loss.mean()
+                if self.params.gradient_accumulation_steps > 1:
+                    teacher_loss = teacher_loss / self.params.gradient_accumulation_steps
+                teacher_loss.backward()
+
             loss_ce = (
                 self.ce_loss_fct(
                     F.log_softmax(s_logits_slct / self.temperature, dim=-1),
@@ -620,28 +631,46 @@ class Distiller:
         if self.params.gradient_accumulation_steps > 1:
             loss = loss / self.params.gradient_accumulation_steps
 
-        if self.params.teacher_trainable:
-            if self.teacher_training:
-                self.teacher_iter += 1
-                if not self.student_updated:
+        if self.params.teacher_trainable and self.teacher_training:
+            self.teacher_iter += 1
+            if self.student_updated and (self.teacher_iter % self.params.gradient_accumulation_steps == 0):
+                if self.fp16:
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                else:
+                    torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
+                if self.params.gradient_accumulation_steps > 1:
+                    dot_product = (self.student_on_l_new - self.student_on_l_old) / self.params.gradient_accumulation_steps
+                for param_name, param in self.teacher.named_parameters():
+                    param.grad = dot_product.item() * param.grad / self.params.student_step
+                self.student_on_l_new = 0
+                self.student_on_l_old = 0
+                self.optimizer_teacher.step()
+                self.optimizer_teacher.zero_grad()
+                self.scheduler_teacher.step()
+                self.teacher_training = False
+                self.student_updated = False
+            elif self.teacher_iter % self.params.gradient_accumulation_steps == 0:
+                if self.fp16:
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                else:
+                    torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                self.scheduler.step()
+                self.student_updated = True
+        else:
+            self.iter()
+            if (self.n_iter % self.params.gradient_accumulation_steps == 0):
+                if self.fp16:
+                    from apex import amp
+
+                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                else:
                     loss.backward()
-                if self.student_updated and (self.teacher_iter % self.params.gradient_accumulation_steps == 0):
-                    if self.fp16:
-                        torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
-                    else:
-                        torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
-                    if self.params.gradient_accumulation_steps > 1:
-                        dot_product = (self.student_on_l_new - self.student_on_l_old) / self.params.gradient_accumulation_steps
-                    for param_name, param in self.teacher.named_parameters():
-                        param.grad = dot_product.item() * param.grad 
-                    self.student_on_l_new = 0
-                    self.student_on_l_old = 0
-                    self.optimizer_teacher.step()
-                    self.optimizer_teacher.zero_grad()
-                    self.scheduler_teacher.step()
-                    self.teacher_training = False
-                    self.student_updated = False
-                elif self.teacher_iter % self.params.gradient_accumulation_steps == 0:
+                if self.n_iter % (self.params.gradient_accumulation_steps * self.params.student_step) == 0:
+                    self.teacher_training = True
+                else:
                     if self.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
                     else:
@@ -649,27 +678,6 @@ class Distiller:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self.scheduler.step()
-                    self.student_updated = True
-            else:
-                self.iter()
-                if (self.n_iter % self.params.gradient_accumulation_steps == 0):
-                    if self.fp16:
-                        from apex import amp
-
-                        with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                            scaled_loss.backward()
-                    else:
-                        loss.backward()
-                    if self.n_iter % (self.params.gradient_accumulation_steps * self.params.student_step) == 0:
-                        self.teacher_training = True
-                    else:
-                        if self.fp16:
-                            torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
-                        else:
-                            torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.params.max_grad_norm)
-                        self.optimizer.step()
-                        self.optimizer.zero_grad()
-                        self.scheduler.step()
 
     def iter(self):
         """
