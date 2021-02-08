@@ -615,7 +615,8 @@ class Distiller:
         if self.params.teacher_trainable:
             if self.teacher_training:
                 self.teacher_iter += 1
-                loss.backward()
+                if not self.student_updated:
+                    loss.backward()
                 if self.student_updated and (self.teacher_iter % self.params.gradient_accumulation_steps == 0):
                     if self.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
