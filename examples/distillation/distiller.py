@@ -442,6 +442,8 @@ class Distiller:
                 iter_bar.set_postfix(
                     {"Last_loss": f"{self.last_loss:.2f}", "Avg_cum_loss": f"{self.total_loss_epoch/self.n_iter:.2f}"}
                 )
+                if self.n_iter == 100000:
+                    break
             iter_bar.close()
 
             if self.is_master:
@@ -690,14 +692,15 @@ class Distiller:
                 self.student_updated = True
         else:
             self.iter()
-            if (self.n_iter % self.params.gradient_accumulation_steps == 0):
-                if self.fp16:
-                    from apex import amp
+            if self.fp16:
+                from apex import amp
 
-                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    loss.backward()
+                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+            if (self.n_iter % self.params.gradient_accumulation_steps == 0):
+                
                 if self.n_iter % (self.params.gradient_accumulation_steps * self.params.student_step) == 0:
                     self.teacher_training = True
                 else:
