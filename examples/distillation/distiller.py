@@ -123,6 +123,7 @@ class Distiller:
         self.student_on_l_new = 0
         self.student_on_l_old = 0
         self.student_updated = False
+        self.teacher_supervised_loss = 0
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.lm_loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
@@ -531,6 +532,15 @@ class Distiller:
             loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
             loss = self.alpha_ce * loss_mlm
             if self.student_updated:
+                if self.params.teacher_supervised_training:
+                    teacher_mlm_loss = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), lm_labels.view(-1))
+                    if self.multi_gpu:
+                        teacher_mlm_loss = teacher_mlm_loss.mean()
+                    if self.params.gradient_accumulation_steps > 1:
+                        teacher_mlm_loss = teacher_mlm_loss / self.params.gradient_accumulation_steps
+
+                    self.teacher_supervised_loss += teacher_mlm_loss
+
                 self.teacher_last_loss = loss_mlm.item()
                 self.teacher_total_loss_epoch += loss_mlm.item()
                 if self.multi_gpu:
@@ -646,6 +656,11 @@ class Distiller:
                 self.student_on_l_old = 0
                 self.optimizer_teacher.step()
                 self.optimizer_teacher.zero_grad()
+                if self.params.teacher_supervised_training:
+                    self.teacher_supervised_loss.backward()
+                    self.optimizer_teacher.step()
+                    self.optimizer_teacher.zero_grad()
+                    self.teacher_supervised_loss = 0
                 self.scheduler_teacher.step()
                 self.teacher_training = False
                 self.student_updated = False

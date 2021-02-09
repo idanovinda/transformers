@@ -230,6 +230,7 @@ def main():
     parser.add_argument("--teacher_trainable", action="store_true", help="Whether to update the teacher")
     parser.add_argument("--student_step", type=int, default=1, help="Specidy the number of updating student before update teacher")
     parser.add_argument("--labeled_data", type=str, default='', help="")
+    parser.add_argument("--teacher_supervised_training", action="store_true", help="Whether to use supervised training teacher")
 
     args = parser.parse_args()
     sanity_checks(args)
