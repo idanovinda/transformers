@@ -442,8 +442,6 @@ class Distiller:
                 iter_bar.set_postfix(
                     {"Last_loss": f"{self.last_loss:.2f}", "Avg_cum_loss": f"{self.total_loss_epoch/self.n_iter:.2f}"}
                 )
-                if self.n_iter == 100000:
-                    break
             iter_bar.close()
 
             if self.is_master:
@@ -560,6 +558,7 @@ class Distiller:
                     self.student_on_l_new += loss_mlm.mean()
                 else:
                     self.student_on_l_new += loss_mlm
+                self.teacher_iter += 1
             else:
                 if self.multi_gpu:
                     self.student_on_l_old += loss_mlm.mean()
@@ -655,7 +654,6 @@ class Distiller:
             loss = loss / self.params.gradient_accumulation_steps
 
         if self.params.teacher_trainable and self.teacher_training:
-            self.teacher_iter += 1
             if self.teacher_updated and (self.teacher_iter % self.params.gradient_accumulation_steps == 0):
                 self.optimizer_teacher.step()
                 self.optimizer_teacher.zero_grad()
@@ -755,7 +753,7 @@ class Distiller:
         )
         self.tensorboard.add_scalar(
             tag="losses/teacher_cum_avg_loss_epoch",
-            scalar_value=self.teacher_total_loss_epoch / self.n_iter,
+            scalar_value=self.teacher_total_loss_epoch / self.teacher_iter,
             global_step=self.n_total_iter,
         )
         self.tensorboard.add_scalar(tag="losses/loss", scalar_value=self.last_loss, global_step=self.n_total_iter)
