@@ -123,7 +123,7 @@ class Distiller:
         self.student_on_l_new = 0
         self.student_on_l_old = 0
         self.student_updated = False
-        self.teacher_supervised_loss = 0
+        self.teacher_updated = False
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.lm_loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
@@ -425,6 +425,18 @@ class Distiller:
                         else:
                             token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
                         self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
+                    
+                    # for update supervised teacher
+                    if self.teacher_updated:
+                        for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
+                            if self.params.gpus > 0:
+                                batch_labeled = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch_labeled)
+
+                            if self.mlm:
+                                token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch_labeled)
+                            else:
+                                token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
+                            self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
 
                 iter_bar.update()
                 iter_bar.set_postfix(
@@ -456,7 +468,7 @@ class Distiller:
         lm_labels: `torch.tensor(bs, seq_length)` - The language modeling labels (mlm labels for MLM and clm labels for CLM).
         """
         if self.mlm:
-            if self.teacher_training and self.student_updated:
+            if (self.teacher_training and self.student_updated) or self.teacher_updated:
                 with torch.no_grad():
                     s_logits, s_hidden_states = self.student(
                         input_ids=input_ids, attention_mask=attention_mask
@@ -531,16 +543,15 @@ class Distiller:
         if self.teacher_training:
             loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
             loss = self.alpha_ce * loss_mlm
-            if self.student_updated:
-                if self.params.teacher_supervised_training:
-                    teacher_mlm_loss = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), lm_labels.view(-1))
-                    if self.multi_gpu:
-                        teacher_mlm_loss = teacher_mlm_loss.mean()
-                    if self.params.gradient_accumulation_steps > 1:
-                        teacher_mlm_loss = teacher_mlm_loss / self.params.gradient_accumulation_steps
+            if self.teacher_updated:
+                loss = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), lm_labels.view(-1))
+                if self.multi_gpu:
+                    loss = loss.mean()
+                if self.params.gradient_accumulation_steps > 1:
+                    loss = loss / self.params.gradient_accumulation_steps
+                loss.backward()
 
-                    self.teacher_supervised_loss += teacher_mlm_loss
-
+            elif self.student_updated:
                 self.teacher_last_loss = loss_mlm.item()
                 self.teacher_total_loss_epoch += loss_mlm.item()
                 if self.multi_gpu:
@@ -643,9 +654,15 @@ class Distiller:
 
         if self.params.teacher_trainable and self.teacher_training:
             self.teacher_iter += 1
-            if self.student_updated and (self.teacher_iter % self.params.gradient_accumulation_steps == 0):
+            if self.teacher_updated and (self.teacher_iter % self.params.gradient_accumulation_steps == 0):
+                self.optimizer_teacher.step()
+                self.optimizer_teacher.zero_grad()
+                self.scheduler_teacher.step()
+                self.teacher_updated = False
+                self.teacher_training = False
+            elif self.student_updated and (self.teacher_iter % self.params.gradient_accumulation_steps == 0):
                 if self.fp16:
-                    torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer_teacher), self.params.max_grad_norm)
                 else:
                     torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
                 if self.params.gradient_accumulation_steps > 1:
@@ -657,12 +674,10 @@ class Distiller:
                 self.optimizer_teacher.step()
                 self.optimizer_teacher.zero_grad()
                 if self.params.teacher_supervised_training:
-                    self.teacher_supervised_loss.backward()
-                    self.optimizer_teacher.step()
-                    self.optimizer_teacher.zero_grad()
-                    self.teacher_supervised_loss = 0
-                self.scheduler_teacher.step()
-                self.teacher_training = False
+                    self.teacher_updated = True
+                else:
+                    self.scheduler_teacher.step()
+                    self.teacher_training = False
                 self.student_updated = False
             elif self.teacher_iter % self.params.gradient_accumulation_steps == 0:
                 if self.fp16:
