@@ -745,17 +745,18 @@ class Distiller:
             self.tensorboard.add_scalar(
                 tag="grad_std/" + param_name, scalar_value=param.grad.data.std(), global_step=self.n_total_iter
             )
-
+        
         self.tensorboard.add_scalar(
             tag="losses/cum_avg_loss_epoch",
             scalar_value=self.total_loss_epoch / self.n_iter,
             global_step=self.n_total_iter,
         )
-        self.tensorboard.add_scalar(
-            tag="losses/teacher_cum_avg_loss_epoch",
-            scalar_value=self.teacher_total_loss_epoch / self.teacher_iter,
-            global_step=self.n_total_iter,
-        )
+        if self.teacher_iter > 0:
+            self.tensorboard.add_scalar(
+                tag="losses/teacher_cum_avg_loss_epoch",
+                scalar_value=self.teacher_total_loss_epoch / self.teacher_iter,
+                global_step=self.n_total_iter,
+            )
         self.tensorboard.add_scalar(tag="losses/loss", scalar_value=self.last_loss, global_step=self.n_total_iter)
         self.tensorboard.add_scalar(tag="losses/teacher_loss", scalar_value=self.teacher_last_loss, global_step=self.n_total_iter)
         self.tensorboard.add_scalar(
