@@ -117,7 +117,7 @@ class Distiller:
             self.last_loss_cos = 0
         self.last_log = 0
 
-        self.teacher_last_loss = 0
+        self.teacher_label_loss = 0
         self.teacher_total_loss_epoch = 0
         self.teacher_training = False
         self.student_on_l_new = 0
@@ -552,7 +552,7 @@ class Distiller:
                 loss.backward()
 
             elif self.student_updated:
-                self.teacher_last_loss = loss_mlm.item()
+                self.teacher_label_loss += loss_mlm.item()
                 self.teacher_total_loss_epoch += loss_mlm.item()
                 if self.multi_gpu:
                     self.student_on_l_new += loss_mlm.mean()
@@ -679,6 +679,12 @@ class Distiller:
                     self.scheduler_teacher.step()
                     self.teacher_training = False
                 self.student_updated = False
+
+                if self.is_master:
+                    self.tensorboard.add_scalar(tag="losses/teacher_loss", scalar_value=self.teacher_label_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
+                    self.tensorboard.add_scalar(tag="losses/dot_product", scalar_value=dot_product, global_step=self.n_total_iter)
+                self.teacher_label_loss = 0
+
             elif self.teacher_iter % self.params.gradient_accumulation_steps == 0:
                 if self.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(self.optimizer), self.params.max_grad_norm)
@@ -758,7 +764,6 @@ class Distiller:
                 global_step=self.n_total_iter,
             )
         self.tensorboard.add_scalar(tag="losses/loss", scalar_value=self.last_loss, global_step=self.n_total_iter)
-        self.tensorboard.add_scalar(tag="losses/teacher_loss", scalar_value=self.teacher_last_loss, global_step=self.n_total_iter)
         self.tensorboard.add_scalar(
             tag="losses/loss_ce", scalar_value=self.last_loss_ce, global_step=self.n_total_iter
         )
