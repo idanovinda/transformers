@@ -34,6 +34,7 @@ from lm_seqs_dataset import LmSeqsDataset
 from transformers import get_linear_schedule_with_warmup
 from utils import logger
 from lm_seqs_dataset import LmSeqsDataset
+from transformers import BertForMaskedLM
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -118,6 +119,7 @@ class Distiller:
         self.last_log = 0
 
         self.teacher_label_loss = 0
+        self.teacher_original_loss = 0
         self.teacher_total_loss_epoch = 0
         self.teacher_training = False
         self.student_on_l_new = 0
@@ -131,6 +133,8 @@ class Distiller:
             self.mse_loss_fct = nn.MSELoss(reduction="sum")
         if self.alpha_cos > 0.0:
             self.cosine_loss_fct = nn.CosineEmbeddingLoss(reduction="mean")
+
+        self.teacher_static = BertForMaskedLM.from_pretrained(params.teacher_name, output_hidden_states=True, cache_dir=params.cache_dir)
 
         logger.info("--- Initializing model optimizer")
         assert params.gradient_accumulation_steps >= 1
@@ -550,8 +554,16 @@ class Distiller:
                 if self.params.gradient_accumulation_steps > 1:
                     loss = loss / self.params.gradient_accumulation_steps
                 loss.backward()
-
             elif self.student_updated:
+                input_ids_cpu = input_ids.clone().cpu()
+                attention_mask_cpu = attention_mask.clone().cpu()
+                with torch.no_grad():
+                    t_logits_static, _ = self.teacher_static(input_ids=input_ids_cpu, attention_mask=attention_mask_cpu)
+                _, t_logits_static_argmax = torch.max(t_logits_static.view(-1, t_logits_static.size(-1)), dim=-1)
+                t_logits_static_argmax_labels = torch.tensor([-100 if x==-100 else t_logits_static_argmax[i] 
+                                                            for i,x in enumerate(lm_labels.view(-1))]).to(f"cuda:{self.params.local_rank}")
+                loss_teacher = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), t_logits_static_argmax_labels)
+                self.teacher_original_loss += loss_teacher.item()
                 self.teacher_label_loss += loss_mlm.item()
                 self.teacher_total_loss_epoch += loss_mlm.item()
                 if self.multi_gpu:
@@ -563,7 +575,7 @@ class Distiller:
                 if self.multi_gpu:
                     self.student_on_l_old += loss_mlm.mean()
                 else:
-                    self.student_on_l_old += loss_mlm
+                    self.student_on_l_old += loss_mlm     
         else:
             # for teacher mpl loss
             if self.params.teacher_trainable:
@@ -681,9 +693,11 @@ class Distiller:
                 self.student_updated = False
 
                 if self.is_master:
-                    self.tensorboard.add_scalar(tag="losses/teacher_loss", scalar_value=self.teacher_label_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
+                    self.tensorboard.add_scalar(tag="losses/teacher_label_loss", scalar_value=self.teacher_label_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
                     self.tensorboard.add_scalar(tag="losses/dot_product", scalar_value=dot_product, global_step=self.n_total_iter)
+                    self.tensorboard.add_scalar(tag="losses/teacher_original_loss", scalar_value=self.teacher_original_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
                 self.teacher_label_loss = 0
+                self.teacher_original_loss = 0
 
             elif self.teacher_iter % self.params.gradient_accumulation_steps == 0:
                 if self.fp16:
