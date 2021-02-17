@@ -547,6 +547,7 @@ class Distiller:
         if self.teacher_training:
             loss_mlm = self.lm_loss_fct(s_logits.view(-1, s_logits.size(-1)), lm_labels.view(-1))
             loss = self.alpha_ce * loss_mlm
+            self.teacher_iter += 1
             if self.teacher_updated:
                 loss = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), lm_labels.view(-1))
                 if self.multi_gpu:
@@ -554,6 +555,7 @@ class Distiller:
                 if self.params.gradient_accumulation_steps > 1:
                     loss = loss / self.params.gradient_accumulation_steps
                 loss.backward()
+                
             elif self.student_updated:
                 input_ids_cpu = input_ids.clone().cpu()
                 attention_mask_cpu = attention_mask.clone().cpu()
@@ -567,12 +569,9 @@ class Distiller:
                 self.teacher_original_loss += loss_teacher.mean()
                 self.teacher_label_loss += loss_label_teacher.mean()
                 self.teacher_total_loss_epoch += loss_mlm.mean()
-                
-                self.student_on_l_new += loss_mlm
-                self.teacher_iter += 1
+                self.student_on_l_new += loss_mlm.item()
             else:
-                self.student_on_l_old += loss_mlm
-                self.teacher_iter += 1
+                self.student_on_l_old += loss_mlm.item()
         else:
             # for teacher mpl loss
             if self.params.teacher_trainable:
@@ -675,10 +674,9 @@ class Distiller:
                 else:
                     torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
                 if self.params.gradient_accumulation_steps > 1:
-                    dot_product = (self.student_on_l_new.mean() - self.student_on_l_old.mean()) / self.params.gradient_accumulation_steps
+                    dot_product = (self.student_on_l_new - self.student_on_l_old) / self.params.gradient_accumulation_steps
                 for param_name, param in self.teacher.named_parameters():
                     param.grad = dot_product * param.grad / self.params.student_step
-                
                 self.optimizer_teacher.step()
                 self.optimizer_teacher.zero_grad()
                 if self.params.teacher_supervised_training:
