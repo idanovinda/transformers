@@ -563,19 +563,16 @@ class Distiller:
                 t_logits_static_argmax_labels = torch.tensor([-100 if x==-100 else t_logits_static_argmax[i] 
                                                             for i,x in enumerate(lm_labels.view(-1))]).to(f"cuda:{self.params.local_rank}")
                 loss_teacher = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), t_logits_static_argmax_labels)
-                self.teacher_original_loss += loss_teacher.item()
-                self.teacher_label_loss += loss_mlm.item()
-                self.teacher_total_loss_epoch += loss_mlm.item()
-                if self.multi_gpu:
-                    self.student_on_l_new += loss_mlm.mean()
-                else:
-                    self.student_on_l_new += loss_mlm
+                loss_label_teacher = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), lm_labels.view(-1))
+                self.teacher_original_loss += loss_teacher.mean()
+                self.teacher_label_loss += loss_label_teacher.mean()
+                self.teacher_total_loss_epoch += loss_mlm.mean()
+                
+                self.student_on_l_new += loss_mlm
                 self.teacher_iter += 1
             else:
-                if self.multi_gpu:
-                    self.student_on_l_old += loss_mlm.mean()
-                else:
-                    self.student_on_l_old += loss_mlm     
+                self.student_on_l_old += loss_mlm
+                self.teacher_iter += 1
         else:
             # for teacher mpl loss
             if self.params.teacher_trainable:
@@ -678,11 +675,10 @@ class Distiller:
                 else:
                     torch.nn.utils.clip_grad_norm_(self.teacher.parameters(), self.params.max_grad_norm)
                 if self.params.gradient_accumulation_steps > 1:
-                    dot_product = (self.student_on_l_new - self.student_on_l_old) / self.params.gradient_accumulation_steps
+                    dot_product = (self.student_on_l_new.mean() - self.student_on_l_old.mean()) / self.params.gradient_accumulation_steps
                 for param_name, param in self.teacher.named_parameters():
-                    param.grad = dot_product.item() * param.grad / self.params.student_step
-                self.student_on_l_new = 0
-                self.student_on_l_old = 0
+                    param.grad = dot_product * param.grad / self.params.student_step
+                
                 self.optimizer_teacher.step()
                 self.optimizer_teacher.zero_grad()
                 if self.params.teacher_supervised_training:
