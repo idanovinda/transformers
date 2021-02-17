@@ -566,9 +566,9 @@ class Distiller:
                                                             for i,x in enumerate(lm_labels.view(-1))]).to(f"cuda:{self.params.local_rank}")
                 loss_teacher = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), t_logits_static_argmax_labels)
                 loss_label_teacher = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), lm_labels.view(-1))
-                self.teacher_original_loss += loss_teacher.mean()
-                self.teacher_label_loss += loss_label_teacher.mean()
-                self.teacher_total_loss_epoch += loss_mlm.mean()
+                self.teacher_original_loss += loss_teacher.item()
+                self.teacher_label_loss += loss_label_teacher.item()
+                self.teacher_total_loss_epoch += loss_mlm.item()
                 self.student_on_l_new += loss_mlm.item()
             else:
                 self.student_on_l_old += loss_mlm.item()
