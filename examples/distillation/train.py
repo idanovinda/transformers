@@ -291,13 +291,6 @@ def main():
     else:
         token_probs = None
 
-    if args.teacher_trainable:
-        logger.info(f"Loading labeled data from {args.labeled_data}")
-        with open(args.labeled_data, "rb") as fp:
-            labeled_data = pickle.load(fp)
-        
-        labeled_lm_seq_dataset = LmSeqsDataset(params=args, data=labeled_data)
-
     train_lm_seq_dataset = LmSeqsDataset(params=args, data=data)
     logger.info("Data loader created.")
 
@@ -359,7 +352,17 @@ def main():
     # DISTILLER #
     torch.cuda.empty_cache()
     if args.teacher_trainable:
-        distiller = Distiller(
+        if args.labeled_data == '':
+            distiller = Distiller(
+                params=args, dataset=train_lm_seq_dataset, token_probs=token_probs, student=student, teacher=teacher, tokenizer=tokenizer, labeled_dataset=train_lm_seq_dataset
+            )
+        else:
+            logger.info(f"Loading labeled data from {args.labeled_data}")
+            with open(args.labeled_data, "rb") as fp:
+                labeled_data = pickle.load(fp)
+        
+            labeled_lm_seq_dataset = LmSeqsDataset(params=args, data=labeled_data)
+            distiller = Distiller(
             params=args, dataset=train_lm_seq_dataset, token_probs=token_probs, student=student, teacher=teacher, tokenizer=tokenizer, labeled_dataset=labeled_lm_seq_dataset
         )
     else:

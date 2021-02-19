@@ -34,7 +34,6 @@ python -m torch.distributed.launch \
     train.py \
 	--gradient_accumulation_steps 125 \
 	--n_epoch $EPOCH \
-        --force \
         --gpus $WORLD_SIZE \
         --student_type distilbert \
         --student_config training_configs/distilbert-base-uncased.json \
