@@ -120,6 +120,8 @@ class Distiller:
 
         self.teacher_label_loss = 0
         self.teacher_original_loss = 0
+        self.teacher_ori_new_loss = 0
+        self.teacher_new_ori_loss = 0
         self.teacher_total_loss_epoch = 0
         self.teacher_training = False
         self.student_on_l_new = 0
@@ -566,6 +568,13 @@ class Distiller:
                                                             for i,x in enumerate(lm_labels.view(-1))]).to(f"cuda:{self.params.local_rank}")
                 loss_teacher = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), t_logits_static_argmax_labels)
                 loss_label_teacher = self.lm_loss_fct(t_logits.view(-1, t_logits.size(-1)), lm_labels.view(-1))
+                
+                t_logits_static_slct = torch.masked_select(t_logits_static, mask).view(-1, t_logits_static.size(-1))
+                kldiv_ori_new = self.ce_loss_fct(F.softmax(t_logits_static_slct / self.temperature, dim=-1), t_softmax) * (self.temperature) ** 2
+                kldiv_new_ori = self.ce_loss_fct(t_softmax, F.softmax(t_logits_static_slct / self.temperature, dim=-1)) * (self.temperature) ** 2
+
+                self.teacher_ori_new_loss += kldiv_ori_new.item()
+                self.teacher_new_ori_loss += kldiv_new_ori.item()
                 self.teacher_original_loss += loss_teacher.item()
                 self.teacher_label_loss += loss_label_teacher.item()
                 self.teacher_total_loss_epoch += loss_mlm.item()
@@ -690,8 +699,12 @@ class Distiller:
                     self.tensorboard.add_scalar(tag="losses/teacher_label_loss", scalar_value=self.teacher_label_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
                     self.tensorboard.add_scalar(tag="losses/dot_product", scalar_value=dot_product, global_step=self.n_total_iter)
                     self.tensorboard.add_scalar(tag="losses/teacher_original_loss", scalar_value=self.teacher_original_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
+                    self.tensorboard.add_scalar(tag="losses/teacher_new_ori_loss", scalar_value=self.teacher_new_ori_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
+                    self.tensorboard.add_scalar(tag="losses/teacher_ori_new_loss", scalar_value=self.teacher_ori_new_loss/self.params.gradient_accumulation_steps, global_step=self.n_total_iter)
                 self.teacher_label_loss = 0
                 self.teacher_original_loss = 0
+                self.teacher_new_ori_loss = 0
+                self.teacher_ori_new_loss = 0
 
             elif self.teacher_iter % self.params.gradient_accumulation_steps == 0:
                 if self.fp16:
@@ -713,7 +726,7 @@ class Distiller:
                 loss.backward()
             if (self.n_iter % self.params.gradient_accumulation_steps == 0):
                 
-                if self.n_iter % (self.params.gradient_accumulation_steps * self.params.student_step) == 0:
+                if ((self.n_iter % (self.params.gradient_accumulation_steps * self.params.student_step) == 0) and self.params.teacher_trainable):
                     self.teacher_training = True
                 else:
                     if self.fp16:
