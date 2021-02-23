@@ -562,7 +562,8 @@ class Distiller:
                 input_ids_cpu = input_ids.clone().cpu()
                 attention_mask_cpu = attention_mask.clone().cpu()
                 with torch.no_grad():
-                    t_logits_static, _ = self.teacher_static(input_ids=input_ids_cpu, attention_mask=attention_mask_cpu).to(f"cuda:{self.params.local_rank}")
+                    t_logits_static, _ = self.teacher_static(input_ids=input_ids_cpu, attention_mask=attention_mask_cpu)
+                t_logits_static.to(f"cuda:{self.params.local_rank}")
                 _, t_logits_static_argmax = torch.max(t_logits_static.view(-1, t_logits_static.size(-1)), dim=-1)
                 t_logits_static_argmax_labels = torch.tensor([-100 if x==-100 else t_logits_static_argmax[i] 
                                                             for i,x in enumerate(lm_labels.view(-1))]).to(f"cuda:{self.params.local_rank}")
