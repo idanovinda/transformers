@@ -383,17 +383,19 @@ class Distiller:
                 torch.distributed.barrier()
 
             iter_bar = tqdm(self.dataloader, desc="-Iter", disable=self.params.local_rank not in [-1, 0])
-            for batch in iter_bar:
-                if self.params.gpus > 0:
-                    batch = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch)
+            for i, batch in enumerate(iter_bar):
+                # if self.params.gpus > 0:
+                #     batch = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch)
 
-                if self.mlm:
-                    token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch)
-                else:
-                    token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch)
-                self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
+                # if self.mlm:
+                #     token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch)
+                # else:
+                #     token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch)
+                # self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
 
-                if self.teacher_training:
+                if (i+1)%(self.params.gpus*self.params.gradient_accumulation_steps*self.params.student_step) == 0:
+                    self.teacher_training = True
+                    self.teacher_updated = True
                     num_data_to_sampling = self.params.gpus * self.params.batch_size * self.params.gradient_accumulation_steps
                     index_to_sampling = torch.randperm(len(self.labeled_dataset))[:num_data_to_sampling]
                     subset = LmSeqsDataset(self.params, self.labeled_dataset.__getitem__(index_to_sampling)[0])
@@ -409,29 +411,29 @@ class Distiller:
                         sampler = BatchSampler(sampler=sampler, batch_size=self.params.batch_size, drop_last=False)
 
                     labeled_dataloader = DataLoader(dataset=subset, batch_sampler=sampler, collate_fn=subset.batch_sequences)
-                    
-                    # computed labeled batch in old student 
-                    for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
-                        if self.params.gpus > 0:
-                            batch_labeled = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch_labeled)
+                        
+                        # computed labeled batch in old student 
+                        # for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
+                        #     if self.params.gpus > 0:
+                        #         batch_labeled = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch_labeled)
 
-                        if self.mlm:
-                            token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch_labeled)
-                        else:
-                            token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
-                        self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
+                        #     if self.mlm:
+                        #         token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch_labeled)
+                        #     else:
+                        #         token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
+                        #     self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
 
-                    # compute labeled batch in new student
-                    for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
-                        if self.params.gpus > 0:
-                            batch_labeled = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch_labeled)
+                        # compute labeled batch in new student
+                        # for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
+                        #     if self.params.gpus > 0:
+                        #         batch_labeled = tuple(t.to(f"cuda:{self.params.local_rank}") for t in batch_labeled)
 
-                        if self.mlm:
-                            token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch_labeled)
-                        else:
-                            token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
-                        self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
-                    
+                        #     if self.mlm:
+                        #         token_ids, attn_mask, lm_labels = self.prepare_batch_mlm(batch=batch_labeled)
+                        #     else:
+                        #         token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
+                        #     self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
+                        
                     # for update supervised teacher
                     if self.teacher_updated:
                         for batch_idx, batch_labeled in enumerate(labeled_dataloader, 0):
@@ -444,10 +446,13 @@ class Distiller:
                                 token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch_labeled)
                             self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
 
-                iter_bar.update()
-                iter_bar.set_postfix(
-                    {"Last_loss": f"{self.last_loss:.2f}", "Avg_cum_loss": f"{self.total_loss_epoch/self.n_iter:.2f}"}
-                )
+                    self.teacher_training = False
+                    self.teacher_updated = False
+
+                # iter_bar.update()
+                # iter_bar.set_postfix(
+                #     {"Last_loss": f"{self.last_loss:.2f}", "Avg_cum_loss": f"{self.total_loss_epoch/self.n_iter:.2f}"}
+                # )
             iter_bar.close()
 
             if self.is_master:
@@ -827,12 +832,12 @@ class Distiller:
 
         if self.is_master:
             self.save_checkpoint(checkpoint_name=f"model_epoch_{self.epoch}.pth")
-            self.tensorboard.add_scalar(
-                tag="epoch/loss", scalar_value=self.total_loss_epoch / self.n_iter, global_step=self.epoch
-            )
-            self.tensorboard.add_scalar(
-                tag="epoch/teacher_loss", scalar_value=self.teacher_total_loss_epoch / self.n_iter, global_step=self.epoch
-            )
+            # self.tensorboard.add_scalar(
+            #     tag="epoch/loss", scalar_value=self.total_loss_epoch / self.n_iter, global_step=self.epoch
+            # )
+            # self.tensorboard.add_scalar(
+            #     tag="epoch/teacher_loss", scalar_value=self.teacher_total_loss_epoch / self.n_iter, global_step=self.epoch
+            # )
 
         self.epoch += 1
         self.n_sequences_epoch = 0
