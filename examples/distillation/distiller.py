@@ -360,18 +360,18 @@ class Distiller:
                     token_ids, attn_mask, lm_labels = self.prepare_batch_clm(batch=batch)
                 self.step(input_ids=token_ids, attention_mask=attn_mask, lm_labels=lm_labels)
 
-                iter_bar.update()
-                iter_bar.set_postfix(
-                    {"Last_loss": f"{self.last_loss:.2f}", "Avg_cum_loss": f"{self.total_loss_epoch/self.n_iter:.2f}"}
-                )
-            iter_bar.close()
+            #     iter_bar.update()
+            #     iter_bar.set_postfix(
+            #         {"Last_loss": f"{self.last_loss:.2f}", "Avg_cum_loss": f"{self.total_loss_epoch/self.n_iter:.2f}"}
+            #     )
+            # iter_bar.close()
 
-            if self.is_master:
-                logger.info(f"--- Ending epoch {self.epoch}/{self.params.n_epoch-1}")
-                if (self.epoch+1)%self.params.checkpoint_epoch_interval==0:
-                    logger.info(f"--- Saving model in epoch checkpoint {self.epoch}")
-                    self.save_checkpoint(checkpoint_name="pytorch_model.bin", dir="checkpoint_epoch_"+str(self.epoch+1))
-            self.end_epoch()
+            # if self.is_master:
+            #     logger.info(f"--- Ending epoch {self.epoch}/{self.params.n_epoch-1}")
+            #     if (self.epoch+1)%self.params.checkpoint_epoch_interval==0:
+            #         logger.info(f"--- Saving model in epoch checkpoint {self.epoch}")
+            #         self.save_checkpoint(checkpoint_name="pytorch_model.bin", dir="checkpoint_epoch_"+str(self.epoch+1))
+            # self.end_epoch()
 
         if self.is_master:
             logger.info("Save very last checkpoint as `pytorch_model.bin`.")
@@ -406,6 +406,18 @@ class Distiller:
                     input_ids=input_ids, attention_mask=None
                 )  # (bs, seq_length, voc_size)
         assert s_logits.size() == t_logits.size()
+
+        output_logits = t_logits.view(-1, t_logits.size(-1))
+        output_softmax = F.softmax(output_logits / self.temperature, dim=-1)
+        dest_file = os.path.join(self.dump_path, "teacher_prediction.txt")
+        with open(dest_file, "a") as f:
+            for x in output_softmax:
+                p = x.cpu().numpy()
+                logp = np.log2(p)
+                entropy = np.sum(-p*logp)
+                f.write(str(entropy)+"\n")
+            f.close()
+        return
 
         # https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py#L100
         # https://github.com/peterliht/knowledge-distillation-pytorch/issues/2
