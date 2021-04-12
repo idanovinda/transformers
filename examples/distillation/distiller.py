@@ -390,9 +390,10 @@ class Distiller:
         lm_labels: `torch.tensor(bs, seq_length)` - The language modeling labels (mlm labels for MLM and clm labels for CLM).
         """
         if self.mlm:
-            s_logits, s_hidden_states = self.student(
-                input_ids=input_ids, attention_mask=attention_mask
-            )  # (bs, seq_length, voc_size)
+            # with torch.no_grad():
+            #     s_logits, s_hidden_states = self.student(
+            #         input_ids=input_ids, attention_mask=attention_mask
+            #     )  # (bs, seq_length, voc_size)
             with torch.no_grad():
                 t_logits, t_hidden_states = self.teacher(
                     input_ids=input_ids, attention_mask=attention_mask
@@ -405,17 +406,37 @@ class Distiller:
                 t_logits, _, t_hidden_states = self.teacher(
                     input_ids=input_ids, attention_mask=None
                 )  # (bs, seq_length, voc_size)
-        assert s_logits.size() == t_logits.size()
+        # assert s_logits.size() == t_logits.size()
+
+          #get the one hot for hard label
+        input_ids_ = input_ids.clone()
+        input_ids_ = torch.where(input_ids_==103, lm_labels, input_ids_) #get the original vocab when it's masked 
+        input_ids_reshape = input_ids_.reshape(input_ids.size(0)*input_ids.size(1), 1) #reshape to (bs*seq_length, 1)
+        t_hard = input_ids_reshape.clone().zero_()
+        t_hard_one_hot = t_hard.repeat(1, t_logits.size(-1)) #clone the size change to zero, reshape (bs*seq_length, vocab_size)
+        t_hard_one_hot.scatter_(1, input_ids_reshape, 1) #fill the value
+        t_hard_one_hot = t_hard_one_hot.reshape(input_ids.size(0), input_ids.size(1), t_hard_one_hot.size(-1)) #reshape to (bs, seq_length, vocab_size)
+        _, t_hard_argmax = torch.max(t_hard_one_hot, -1)
+        assert torch.all(torch.eq(input_ids_, t_hard_argmax))
+   
+        #calculate the agreement
+        _, t_logits_argmax = torch.max(t_logits.view(-1, t_logits.size(-1)), -1)
+        _, t_hard_one_hot_argmax = torch.max(t_hard_one_hot.view(-1, t_logits.size(-1)), -1)
+        agreement = torch.eq(t_logits_argmax, t_hard_one_hot_argmax).long()
+        self.agreement_sum += agreement.sum().item()
+        self.agreement_len += len(agreement)
 
         output_logits = t_logits.view(-1, t_logits.size(-1))
         output_softmax = F.softmax(output_logits / self.temperature, dim=-1)
         dest_file = os.path.join(self.dump_path, "teacher_prediction.txt")
+
         with open(dest_file, "a") as f:
-            for x in output_softmax:
+            for x, a in zip(output_softmax, agreement):
+                argmax = torch.argmax(x)
                 p = x.cpu().numpy()
                 logp = np.log2(p)
-                entropy = np.sum(-p*logp)
-                f.write(str(entropy)+"\n")
+                entropy = np.sum(-p*logp).astype(np.float16)
+                f.write(f"{entropy},{a}\n")
             f.close()
         return
 

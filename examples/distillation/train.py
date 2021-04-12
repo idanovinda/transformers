@@ -351,7 +351,7 @@ def main():
     )
     distiller.train()
     logger.info("Let's go get some drinks.")
-    # logger.info(f"Agreement proportion {distiller.agreement_sum/distiller.agreement_len}")
+    logger.info(f"Agreement proportion {distiller.agreement_sum/distiller.agreement_len}")
 
 if __name__ == "__main__":
     main()
